@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  formatRaycastControlPauseBody,
   formatRaycastPauseMenuMxBody,
   RAYCAST_PAUSE_MENU_LABELS,
   truncatePauseField
@@ -30,16 +31,40 @@ describe('raycast pause menu formatting', () => {
     expect(body).toContain(
       'WASD mover | Mouse mirar | Mando: stick izq mover / stick der girar / RT disparar / X recargar / Start pausa'
     );
+    expect(body).toContain('Configuración de control');
     expect(body).toContain('// MENÚ');
     expect(body).toMatch(/Mundo ·/);
     expect(body).not.toContain('PROGRESO');
     expect(body).toContain(`> ${RAYCAST_PAUSE_MENU_LABELS[2]}`);
     expect(body).toContain(`  ${RAYCAST_PAUSE_MENU_LABELS[0]}`);
-    expect(RAYCAST_PAUSE_MENU_LABELS.length).toBe(7);
+    expect(RAYCAST_PAUSE_MENU_LABELS.length).toBe(8);
   });
 
   it('truncates long pause fields safely', () => {
     expect(truncatePauseField('1234567890', 6).endsWith('…')).toBe(true);
     expect(truncatePauseField('short', 20)).toBe('short');
+  });
+
+  it('renders the pause control panel compactly and clearly', () => {
+    const body = formatRaycastControlPauseBody({
+      controlStatus: 'DETECTADO',
+      selectionIndex: 2,
+      mouseSensitivity: 'x1.00',
+      gamepadSensitivity: 'x1.15',
+      leftDeadzone: '0.18',
+      rightDeadzone: '0.20',
+      invertY: 'NO',
+      vibration: 'SÍ',
+      screenshake: 'SÍ',
+      minimap: 'SÍ'
+    });
+
+    expect(body).toContain('CONFIGURACIÓN DE CONTROL');
+    expect(body).toContain('CONTROL · DETECTADO');
+    expect(body).toContain('RATÓN · sensibilidad x1.00');
+    expect(body).toContain('MANDO · deadzone izq 0.18');
+    expect(body).toContain('MANDO · invertir eje Y NO');
+    expect(body).toContain('VOLVER AL MENÚ');
+    expect(body).toContain('A confirmar');
   });
 });

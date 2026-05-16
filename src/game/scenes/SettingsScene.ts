@@ -3,14 +3,18 @@ import { AudioFeedbackSystem } from '../systems/AudioFeedbackSystem';
 import { RAYCAST_CSS, RAYCAST_PALETTE } from '../raycast/RaycastPalette';
 import {
   ensureSessionSettings,
-  getGamepadDeadzone,
+  getGamepadInvertY,
+  getGamepadLeftDeadzone,
+  getGamepadRightDeadzone,
   getGamepadSensitivity,
   getGamepadVibrationEnabled,
   getMinimapDefaultVisible,
   getMouseSensitivity,
   getScreenshakeEnabled,
   getSessionMasterVolume,
-  setGamepadDeadzone,
+  setGamepadInvertY,
+  setGamepadLeftDeadzone,
+  setGamepadRightDeadzone,
   setGamepadSensitivity,
   setGamepadVibrationEnabled,
   setMinimapDefaultVisible,
@@ -25,7 +29,20 @@ const ACCENT = RAYCAST_CSS.accentText;
 const BODY = RAYCAST_CSS.bodyText;
 const MUTED = RAYCAST_CSS.mutedText;
 
-const ROW_KEYS = ['control', 'mouse', 'pad_sens', 'pad_deadzone', 'pad_vibe', 'vol', 'shake', 'minimap', 'fullscreen', 'back'] as const;
+const ROW_KEYS = [
+  'control',
+  'mouse',
+  'pad_sens',
+  'pad_deadzone_left',
+  'pad_deadzone_right',
+  'invert_y',
+  'pad_vibe',
+  'vol',
+  'shake',
+  'minimap',
+  'fullscreen',
+  'back'
+] as const;
 type SettingRow = (typeof ROW_KEYS)[number];
 
 export class SettingsScene extends Phaser.Scene {
@@ -86,8 +103,10 @@ export class SettingsScene extends Phaser.Scene {
     this.audioPreview.setMasterVolume(getSessionMasterVolume(this.registry));
     this.gamepadInput = new RaycastGamepadInput({
       getSettings: () => ({
-        deadzone: getGamepadDeadzone(this.registry),
+        leftDeadzone: getGamepadLeftDeadzone(this.registry),
+        rightDeadzone: getGamepadRightDeadzone(this.registry),
         lookSensitivity: getGamepadSensitivity(this.registry),
+        invertLookY: getGamepadInvertY(this.registry),
         vibrationEnabled: getGamepadVibrationEnabled(this.registry)
       })
     });
@@ -192,9 +211,16 @@ export class SettingsScene extends Phaser.Scene {
       const next = Math.round((getGamepadSensitivity(this.registry) + direction * 0.05) * 100) / 100;
       setGamepadSensitivity(this.registry, next);
       this.audioPreview.play('uiConfirm', 0.62, this.time.now);
-    } else if (row === 'pad_deadzone') {
-      const next = Math.round((getGamepadDeadzone(this.registry) + direction * 0.01) * 100) / 100;
-      setGamepadDeadzone(this.registry, next);
+    } else if (row === 'pad_deadzone_left') {
+      const next = Math.round((getGamepadLeftDeadzone(this.registry) + direction * 0.01) * 100) / 100;
+      setGamepadLeftDeadzone(this.registry, next);
+      this.audioPreview.play('uiConfirm', 0.62, this.time.now);
+    } else if (row === 'pad_deadzone_right') {
+      const next = Math.round((getGamepadRightDeadzone(this.registry) + direction * 0.01) * 100) / 100;
+      setGamepadRightDeadzone(this.registry, next);
+      this.audioPreview.play('uiConfirm', 0.62, this.time.now);
+    } else if (row === 'invert_y') {
+      setGamepadInvertY(this.registry, !getGamepadInvertY(this.registry));
       this.audioPreview.play('uiConfirm', 0.62, this.time.now);
     } else if (row === 'pad_vibe') {
       setGamepadVibrationEnabled(this.registry, direction > 0);
@@ -219,7 +245,9 @@ export class SettingsScene extends Phaser.Scene {
   private refreshBody(): void {
     const sens = getMouseSensitivity(this.registry).toFixed(2);
     const padSens = getGamepadSensitivity(this.registry).toFixed(2);
-    const padDeadzone = getGamepadDeadzone(this.registry).toFixed(2);
+    const padDeadzoneLeft = getGamepadLeftDeadzone(this.registry).toFixed(2);
+    const padDeadzoneRight = getGamepadRightDeadzone(this.registry).toFixed(2);
+    const invertY = getGamepadInvertY(this.registry) ? 'SÍ' : 'NO';
     const padVibe = getGamepadVibrationEnabled(this.registry) ? 'SÍ' : 'NO';
     const controlStatus = this.gamepadInput.isConnected() ? 'DETECTADO' : 'SIN CONTROL';
     const vol = Math.round(getSessionMasterVolume(this.registry) * 100);
@@ -235,7 +263,9 @@ export class SettingsScene extends Phaser.Scene {
     label('control', `CONTROL · ${controlStatus}`);
     label('mouse', `RATÓN · sensibilidad ×${sens}`);
     label('pad_sens', `MANDO · sensibilidad ×${padSens}`);
-    label('pad_deadzone', `MANDO · deadzone ${padDeadzone}`);
+    label('pad_deadzone_left', `MANDO · deadzone izq ${padDeadzoneLeft}`);
+    label('pad_deadzone_right', `MANDO · deadzone der ${padDeadzoneRight}`);
+    label('invert_y', `MANDO · invertir eje Y ${invertY}`);
     label('pad_vibe', `MANDO · vibración ${padVibe}`);
     label('vol', `AUDIO · volumen maestro ${vol}%`);
     label('shake', `PANTALLA · screenshake ${shake}`);

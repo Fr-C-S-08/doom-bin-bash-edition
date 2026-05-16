@@ -19,8 +19,10 @@ export type RaycastGamepadAction =
   | 'navRight';
 
 export interface RaycastGamepadSettings {
-  deadzone: number;
+  leftDeadzone: number;
+  rightDeadzone: number;
   lookSensitivity: number;
+  invertLookY: boolean;
   vibrationEnabled: boolean;
 }
 
@@ -96,8 +98,8 @@ export function readRaycastGamepadFrame(
   gamepad: RaycastGamepadLike,
   settings: RaycastGamepadSettings
 ): RaycastGamepadFrame {
-  const moveAxes = normalizeRaycastGamepadStick(gamepad.axes[0] ?? 0, gamepad.axes[1] ?? 0, settings.deadzone);
-  const lookAxes = normalizeRaycastGamepadStick(gamepad.axes[2] ?? 0, gamepad.axes[3] ?? 0, settings.deadzone);
+  const moveAxes = normalizeRaycastGamepadStick(gamepad.axes[0] ?? 0, gamepad.axes[1] ?? 0, settings.leftDeadzone);
+  const lookAxes = normalizeRaycastGamepadStick(gamepad.axes[2] ?? 0, gamepad.axes[3] ?? 0, settings.rightDeadzone);
   const heldActions = new Set<RaycastGamepadAction>();
 
   const isButtonDown = (buttonIndex: number): boolean => {
@@ -126,7 +128,7 @@ export function readRaycastGamepadFrame(
   // Look axes are scaled separately so the right stick feels readable without mouse-level jumps.
   const look: MovementVector = {
     x: lookAxes.x * Math.max(0.1, settings.lookSensitivity),
-    y: -lookAxes.y * Math.max(0.1, settings.lookSensitivity)
+    y: (settings.invertLookY ? 1 : -1) * lookAxes.y * Math.max(0.1, settings.lookSensitivity)
   };
 
   return {
@@ -164,8 +166,10 @@ export class RaycastGamepadInput {
     this.getSettings =
       options.getSettings ??
       (() => ({
-        deadzone: RAYCAST_GAMEPAD_DEFAULT_DEADZONE,
+        leftDeadzone: RAYCAST_GAMEPAD_DEFAULT_DEADZONE,
+        rightDeadzone: RAYCAST_GAMEPAD_DEFAULT_DEADZONE,
         lookSensitivity: RAYCAST_GAMEPAD_DEFAULT_LOOK_SENSITIVITY,
+        invertLookY: false,
         vibrationEnabled: false
       }));
     this.getNow = options.getNow ?? (() => (typeof performance !== 'undefined' ? performance.now() : Date.now()));

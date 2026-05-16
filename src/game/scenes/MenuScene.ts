@@ -9,7 +9,14 @@ import {
 import { buildMainMenuLayout, getMainMenuCopy } from '../raycast/RaycastPresentation';
 import { RAYCAST_CSS, RAYCAST_PALETTE } from '../raycast/RaycastPalette';
 import { createEmptyCampaignMetrics } from '../raycast/RaycastScore';
-import { ensureSessionSettings, getGamepadDeadzone, getGamepadSensitivity, getGamepadVibrationEnabled } from '../sessionSettings';
+import {
+  ensureSessionSettings,
+  getGamepadInvertY,
+  getGamepadLeftDeadzone,
+  getGamepadRightDeadzone,
+  getGamepadSensitivity,
+  getGamepadVibrationEnabled
+} from '../sessionSettings';
 import { getRaycastBossLevelId, type RaycastBossShortcutSlot } from '../raycast/RaycastBossShortcuts';
 import { RaycastGamepadInput } from '../systems/RaycastGamepadInput';
 
@@ -112,8 +119,10 @@ export class MenuScene extends Phaser.Scene {
     this.audioFeedback = new AudioFeedbackSystem();
     this.gamepadInput = new RaycastGamepadInput({
       getSettings: () => ({
-        deadzone: getGamepadDeadzone(this.registry),
+        leftDeadzone: getGamepadLeftDeadzone(this.registry),
+        rightDeadzone: getGamepadRightDeadzone(this.registry),
         lookSensitivity: getGamepadSensitivity(this.registry),
+        invertLookY: getGamepadInvertY(this.registry),
         vibrationEnabled: getGamepadVibrationEnabled(this.registry)
       })
     });

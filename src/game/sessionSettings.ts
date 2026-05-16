@@ -3,6 +3,9 @@
 export const SESSION_MOUSE_SENS_KEY = 'session_mouse_sens';
 export const SESSION_GAMEPAD_SENS_KEY = 'session_gamepad_sens';
 export const SESSION_GAMEPAD_DEADZONE_KEY = 'session_gamepad_deadzone';
+export const SESSION_GAMEPAD_LEFT_DEADZONE_KEY = 'session_gamepad_left_deadzone';
+export const SESSION_GAMEPAD_RIGHT_DEADZONE_KEY = 'session_gamepad_right_deadzone';
+export const SESSION_GAMEPAD_INVERT_Y_KEY = 'session_gamepad_invert_y';
 export const SESSION_GAMEPAD_VIBRATION_KEY = 'session_gamepad_vibration';
 export const SESSION_SCREENSHAKE_KEY = 'session_screenshake';
 export const SESSION_MINIMAP_DEFAULT_KEY = 'session_minimap_default';
@@ -16,6 +19,9 @@ export interface SessionRegistry {
 const DEFAULT_MOUSE_SENS = 1;
 const DEFAULT_GAMEPAD_SENS = 1;
 const DEFAULT_GAMEPAD_DEADZONE = 0.18;
+const DEFAULT_GAMEPAD_LEFT_DEADZONE = DEFAULT_GAMEPAD_DEADZONE;
+const DEFAULT_GAMEPAD_RIGHT_DEADZONE = DEFAULT_GAMEPAD_DEADZONE;
+const DEFAULT_GAMEPAD_INVERT_Y = false;
 const DEFAULT_GAMEPAD_VIBRATION = false;
 const DEFAULT_SCREENSHAKE = true;
 const DEFAULT_MINIMAP = true;
@@ -28,7 +34,10 @@ function clamp(n: number, lo: number, hi: number): number {
 export function ensureSessionSettings(registry: SessionRegistry): void {
   if (registry.get(SESSION_MOUSE_SENS_KEY) === undefined) registry.set(SESSION_MOUSE_SENS_KEY, DEFAULT_MOUSE_SENS);
   if (registry.get(SESSION_GAMEPAD_SENS_KEY) === undefined) registry.set(SESSION_GAMEPAD_SENS_KEY, DEFAULT_GAMEPAD_SENS);
-  if (registry.get(SESSION_GAMEPAD_DEADZONE_KEY) === undefined) registry.set(SESSION_GAMEPAD_DEADZONE_KEY, DEFAULT_GAMEPAD_DEADZONE);
+  if (registry.get(SESSION_GAMEPAD_DEADZONE_KEY) === undefined) registry.set(SESSION_GAMEPAD_DEADZONE_KEY, DEFAULT_GAMEPAD_RIGHT_DEADZONE);
+  if (registry.get(SESSION_GAMEPAD_LEFT_DEADZONE_KEY) === undefined) registry.set(SESSION_GAMEPAD_LEFT_DEADZONE_KEY, DEFAULT_GAMEPAD_LEFT_DEADZONE);
+  if (registry.get(SESSION_GAMEPAD_RIGHT_DEADZONE_KEY) === undefined) registry.set(SESSION_GAMEPAD_RIGHT_DEADZONE_KEY, DEFAULT_GAMEPAD_RIGHT_DEADZONE);
+  if (registry.get(SESSION_GAMEPAD_INVERT_Y_KEY) === undefined) registry.set(SESSION_GAMEPAD_INVERT_Y_KEY, DEFAULT_GAMEPAD_INVERT_Y);
   if (registry.get(SESSION_GAMEPAD_VIBRATION_KEY) === undefined) registry.set(SESSION_GAMEPAD_VIBRATION_KEY, DEFAULT_GAMEPAD_VIBRATION);
   if (registry.get(SESSION_SCREENSHAKE_KEY) === undefined) registry.set(SESSION_SCREENSHAKE_KEY, DEFAULT_SCREENSHAKE);
   if (registry.get(SESSION_MINIMAP_DEFAULT_KEY) === undefined) registry.set(SESSION_MINIMAP_DEFAULT_KEY, DEFAULT_MINIMAP);
@@ -56,13 +65,45 @@ export function setGamepadSensitivity(registry: SessionRegistry, value: number):
 }
 
 export function getGamepadDeadzone(registry: SessionRegistry): number {
-  const v = Number(registry.get(SESSION_GAMEPAD_DEADZONE_KEY));
-  if (!Number.isFinite(v)) return DEFAULT_GAMEPAD_DEADZONE;
+  return getGamepadRightDeadzone(registry);
+}
+
+export function getGamepadLeftDeadzone(registry: SessionRegistry): number {
+  const raw = registry.get(SESSION_GAMEPAD_LEFT_DEADZONE_KEY);
+  const v = Number(raw);
+  if (!Number.isFinite(v)) return DEFAULT_GAMEPAD_LEFT_DEADZONE;
   return clamp(v, 0.05, 0.4);
 }
 
+export function setGamepadLeftDeadzone(registry: SessionRegistry, value: number): void {
+  registry.set(SESSION_GAMEPAD_LEFT_DEADZONE_KEY, clamp(value, 0.05, 0.4));
+}
+
+export function getGamepadRightDeadzone(registry: SessionRegistry): number {
+  const v = Number(registry.get(SESSION_GAMEPAD_DEADZONE_KEY));
+  if (Number.isFinite(v)) return clamp(v, 0.05, 0.4);
+  const fallback = Number(registry.get(SESSION_GAMEPAD_RIGHT_DEADZONE_KEY));
+  if (!Number.isFinite(fallback)) return DEFAULT_GAMEPAD_RIGHT_DEADZONE;
+  return clamp(fallback, 0.05, 0.4);
+}
+
+export function setGamepadRightDeadzone(registry: SessionRegistry, value: number): void {
+  const clamped = clamp(value, 0.05, 0.4);
+  registry.set(SESSION_GAMEPAD_DEADZONE_KEY, clamped);
+  registry.set(SESSION_GAMEPAD_RIGHT_DEADZONE_KEY, clamped);
+}
+
 export function setGamepadDeadzone(registry: SessionRegistry, value: number): void {
-  registry.set(SESSION_GAMEPAD_DEADZONE_KEY, clamp(value, 0.05, 0.4));
+  setGamepadRightDeadzone(registry, value);
+}
+
+export function getGamepadInvertY(registry: SessionRegistry): boolean {
+  const v = registry.get(SESSION_GAMEPAD_INVERT_Y_KEY);
+  return v === true;
+}
+
+export function setGamepadInvertY(registry: SessionRegistry, enabled: boolean): void {
+  registry.set(SESSION_GAMEPAD_INVERT_Y_KEY, Boolean(enabled));
 }
 
 export function getGamepadVibrationEnabled(registry: SessionRegistry): boolean {

@@ -30,6 +30,8 @@ export const RAYCAST_MOVEMENT: RaycastMovementConfig = {
   collisionRadius: 0.18
 };
 
+export const RAYCAST_MAX_LOOK_DELTA_RADIANS = Math.PI * 0.35;
+
 export function getCameraRelativeInput(
   forwardInput: number,
   strafeInput: number,
@@ -76,9 +78,19 @@ export function updateRaycastVelocity(
 export function applyRaycastMouseTurn(
   currentAngle: number,
   movementX: number,
-  config: Pick<RaycastMovementConfig, 'mouseTurnSensitivity'> = RAYCAST_MOVEMENT
+  config: Pick<RaycastMovementConfig, 'mouseTurnSensitivity'> = RAYCAST_MOVEMENT,
+  maxDeltaRadians = RAYCAST_MAX_LOOK_DELTA_RADIANS
 ): number {
-  return currentAngle + movementX * config.mouseTurnSensitivity;
+  const rawDelta = movementX * config.mouseTurnSensitivity;
+  const clampedDelta = clampRaycastLookDelta(rawDelta, maxDeltaRadians);
+  return currentAngle + clampedDelta;
+}
+
+export function clampRaycastLookDelta(deltaRadians: number, maxDeltaRadians = RAYCAST_MAX_LOOK_DELTA_RADIANS): number {
+  if (!Number.isFinite(deltaRadians)) return 0;
+  const cap = Math.max(0, maxDeltaRadians);
+  if (cap === 0) return 0;
+  return Math.min(cap, Math.max(-cap, deltaRadians));
 }
 
 export function moveWithWallSlide(

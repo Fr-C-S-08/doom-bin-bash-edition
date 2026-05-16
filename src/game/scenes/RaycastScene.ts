@@ -206,8 +206,10 @@ import {
   tickRaycastPassiveHeal
 } from '../raycast/RaycastPassiveHeal';
 import {
+  formatRaycastControlPauseBody,
   formatRaycastPauseMenuMxBody,
   RAYCAST_PAUSE_MENU_ACTIONS,
+  RAYCAST_CONTROL_PAUSE_ROWS,
   RAYCAST_PAUSE_MENU_LABELS
 } from '../raycast/RaycastPauseMenu';
 import { getBillboardColor } from '../raycast/RaycastVisualTheme';
@@ -216,13 +218,23 @@ import { RaycastGamepadInput } from '../systems/RaycastGamepadInput';
 import { palette } from '../theme/palette';
 import {
   ensureSessionSettings,
-  getGamepadDeadzone,
+  getGamepadInvertY,
+  getGamepadLeftDeadzone,
+  getGamepadRightDeadzone,
   getGamepadSensitivity,
   getGamepadVibrationEnabled,
   getMinimapDefaultVisible,
   getMouseSensitivity,
   getScreenshakeEnabled,
   getSessionMasterVolume,
+  setGamepadInvertY,
+  setGamepadLeftDeadzone,
+  setGamepadRightDeadzone,
+  setGamepadSensitivity,
+  setGamepadVibrationEnabled,
+  setMinimapDefaultVisible,
+  setMouseSensitivity,
+  setScreenshakeEnabled,
   setSessionMasterVolume
 } from '../sessionSettings';
 
@@ -321,6 +333,8 @@ export class RaycastScene extends Phaser.Scene {
   private helpOverlayVisible = false;
   private gamePaused = false;
   private pauseSelectionIndex = 0;
+  private pauseControlSelectionIndex = 1;
+  private pausePanelMode: 'main' | 'control' = 'main';
   private passiveRegenHudActive = false;
   private passiveRegenHudLabel: string | null = null;
   private passiveHealFractionalCarry = 0;
@@ -580,6 +594,10 @@ export class RaycastScene extends Phaser.Scene {
   private readonly handleEscKey = (): void => {
     if (!this.isRaycastSceneActive()) return;
     if (this.gamePaused) {
+      if (this.pausePanelMode === 'control') {
+        this.closeControlSettingsPanel();
+        return;
+      }
       this.closePauseMenu();
       return;
     }
@@ -592,19 +610,57 @@ export class RaycastScene extends Phaser.Scene {
 
   private readonly handlePauseMenuUp = (): void => {
     if (!this.gamePaused) return;
-    this.pauseSelectionIndex =
-      (this.pauseSelectionIndex + RAYCAST_PAUSE_MENU_LABELS.length - 1) % RAYCAST_PAUSE_MENU_LABELS.length;
+    if (this.pausePanelMode === 'control') {
+      this.pauseControlSelectionIndex = this.getWrappedControlSelectionIndex(-1);
+    } else {
+      this.pauseSelectionIndex =
+        (this.pauseSelectionIndex + RAYCAST_PAUSE_MENU_LABELS.length - 1) % RAYCAST_PAUSE_MENU_LABELS.length;
+    }
     this.refreshPauseMenuBody();
   };
 
   private readonly handlePauseMenuDown = (): void => {
     if (!this.gamePaused) return;
-    this.pauseSelectionIndex = (this.pauseSelectionIndex + 1) % RAYCAST_PAUSE_MENU_LABELS.length;
+    if (this.pausePanelMode === 'control') {
+      this.pauseControlSelectionIndex = this.getWrappedControlSelectionIndex(1);
+    } else {
+      this.pauseSelectionIndex = (this.pauseSelectionIndex + 1) % RAYCAST_PAUSE_MENU_LABELS.length;
+    }
     this.refreshPauseMenuBody();
+  };
+
+  private readonly handlePauseMenuLeft = (): void => {
+    if (!this.gamePaused || this.pausePanelMode !== 'control') return;
+    this.adjustControlSetting(-1);
+  };
+
+  private readonly handlePauseMenuRight = (): void => {
+    if (!this.gamePaused || this.pausePanelMode !== 'control') return;
+    this.adjustControlSetting(1);
+  };
+
+  private readonly handlePauseMenuPointerDown = (): void => {
+    if (!this.gamePaused) return;
+    this.handlePauseMenuConfirm();
+  };
+
+  private readonly handlePauseMenuWheel = (_pointer: Phaser.Input.Pointer, _gameObjects: unknown, _dx: number, dy: number): void => {
+    if (!this.gamePaused) return;
+    if (dy > 0) this.handlePauseMenuDown();
+    else if (dy < 0) this.handlePauseMenuUp();
   };
 
   private readonly handlePauseMenuConfirm = (): void => {
     if (!this.gamePaused) return;
+    if (this.pausePanelMode === 'control') {
+      if (RAYCAST_CONTROL_PAUSE_ROWS[this.pauseControlSelectionIndex] === 'back') {
+        this.closeControlSettingsPanel();
+        return;
+      }
+      this.adjustControlSetting(1);
+      return;
+    }
+
     const action = RAYCAST_PAUSE_MENU_ACTIONS[this.pauseSelectionIndex];
     switch (action) {
       case 'resume':
@@ -620,6 +676,9 @@ export class RaycastScene extends Phaser.Scene {
           rewardTier: this.rewardTier,
           runModifierId: this.runModifier?.id ?? null
         });
+        break;
+      case 'controls':
+        this.openControlSettingsPanel();
         break;
       case 'menu':
         this.closePauseMenu();
@@ -673,8 +732,10 @@ export class RaycastScene extends Phaser.Scene {
     this.triggerSystem = new TriggerSystem();
     this.gamepadInput = new RaycastGamepadInput({
       getSettings: () => ({
-        deadzone: getGamepadDeadzone(this.registry),
+        leftDeadzone: getGamepadLeftDeadzone(this.registry),
+        rightDeadzone: getGamepadRightDeadzone(this.registry),
         lookSensitivity: getGamepadSensitivity(this.registry),
+        invertLookY: getGamepadInvertY(this.registry),
         vibrationEnabled: getGamepadVibrationEnabled(this.registry)
       })
     });
@@ -685,7 +746,8 @@ export class RaycastScene extends Phaser.Scene {
       this.player,
       RAYCAST_MOVEMENT,
       () => getMouseSensitivity(this.registry),
-      this.gamepadInput
+      this.gamepadInput,
+      () => !this.gamePaused
     );
     this.controller.create();
     this.controller.setMoveSpeedMultiplier(
@@ -1199,7 +1261,10 @@ export class RaycastScene extends Phaser.Scene {
     if (!this.gamepadInput) return;
     this.gamepadInput.update();
     const message = this.gamepadInput.consumeStatusMessage();
-    if (message) this.setCombatMessage(message, 1600);
+    if (message) {
+      this.controller?.suppressLookInput(2);
+      this.setCombatMessage(message, 1600);
+    }
 
     if (this.gamepadInput.consumePressed('toggleMap')) {
       this.handleToggleMinimap();
@@ -1210,7 +1275,10 @@ export class RaycastScene extends Phaser.Scene {
     }
 
     if (this.gamepadInput.consumePressed('cancel')) {
-      if (this.gamePaused) this.closePauseMenu();
+      if (this.gamePaused) {
+        if (this.pausePanelMode === 'control') this.closeControlSettingsPanel();
+        else this.closePauseMenu();
+      }
       else this.handleEscKey();
     }
 
@@ -1245,6 +1313,14 @@ export class RaycastScene extends Phaser.Scene {
 
     if (this.gamepadInput.consumePressed('navDown')) {
       this.handlePauseMenuDown();
+    }
+
+    if (this.gamepadInput.consumePressed('navLeft')) {
+      this.handlePauseMenuLeft();
+    }
+
+    if (this.gamepadInput.consumePressed('navRight')) {
+      this.handlePauseMenuRight();
     }
   }
 
@@ -1379,8 +1455,12 @@ export class RaycastScene extends Phaser.Scene {
     keyboard?.on('keydown-BACKTICK', this.handleToggleDebug);
     keyboard?.on('keydown-UP', this.handlePauseMenuUp);
     keyboard?.on('keydown-DOWN', this.handlePauseMenuDown);
+    keyboard?.on('keydown-LEFT', this.handlePauseMenuLeft);
+    keyboard?.on('keydown-RIGHT', this.handlePauseMenuRight);
     keyboard?.on('keydown-ENTER', this.handlePauseMenuConfirm);
     this.input.on('pointerdown', this.handleFireInput);
+    this.input.on('wheel', this.handlePauseMenuWheel);
+    this.input.on('pointerdown', this.handlePauseMenuPointerDown);
     this.inputListenersRegistered = true;
   }
 
@@ -1420,8 +1500,12 @@ export class RaycastScene extends Phaser.Scene {
     keyboard?.off('keydown-BACKTICK', this.handleToggleDebug);
     keyboard?.off('keydown-UP', this.handlePauseMenuUp);
     keyboard?.off('keydown-DOWN', this.handlePauseMenuDown);
+    keyboard?.off('keydown-LEFT', this.handlePauseMenuLeft);
+    keyboard?.off('keydown-RIGHT', this.handlePauseMenuRight);
     keyboard?.off('keydown-ENTER', this.handlePauseMenuConfirm);
     this.input.off('pointerdown', this.handleFireInput);
+    this.input.off('wheel', this.handlePauseMenuWheel);
+    this.input.off('pointerdown', this.handlePauseMenuPointerDown);
     this.inputListenersRegistered = false;
   }
 
@@ -1849,27 +1933,68 @@ export class RaycastScene extends Phaser.Scene {
   private openPauseMenu(): void {
     this.gamePaused = true;
     this.pauseSelectionIndex = 0;
+    this.pausePanelMode = 'main';
     this.pauseDim.setVisible(true);
     this.pausePanel.setVisible(true);
     this.pauseTitleText.setVisible(true);
     this.pauseMenuBodyText.setVisible(true);
     this.applyPauseMinimapPresentation();
+    this.controller?.suppressLookInput(2);
     this.refreshPauseMenuBody();
     this.audioFeedback.play('uiSoftDeny', 0.62, this.time.now);
   }
 
   private closePauseMenu(): void {
     this.gamePaused = false;
+    this.pausePanelMode = 'main';
+    this.pauseControlSelectionIndex = 1;
     this.pauseDim.setVisible(false);
     this.pausePanel.setVisible(false);
     this.pauseTitleText.setVisible(false);
     this.pauseMenuBodyText.setVisible(false);
     this.restoreGameplayMinimapPresentation();
+    this.controller?.suppressLookInput(2);
     this.audioFeedback.play('uiConfirm', 0.72, this.time.now);
+  }
+
+  private openControlSettingsPanel(): void {
+    this.pausePanelMode = 'control';
+    this.pauseControlSelectionIndex = 1;
+    this.controller?.suppressLookInput(2);
+    this.refreshPauseMenuBody();
+    this.audioFeedback.play('uiConfirm', 0.68, this.time.now);
+  }
+
+  private closeControlSettingsPanel(): void {
+    this.pausePanelMode = 'main';
+    this.pauseSelectionIndex = Math.min(this.pauseSelectionIndex, RAYCAST_PAUSE_MENU_LABELS.length - 1);
+    this.controller?.suppressLookInput(2);
+    this.refreshPauseMenuBody();
+    this.audioFeedback.play('uiConfirm', 0.68, this.time.now);
   }
 
   private refreshPauseMenuBody(): void {
     const volPct = Math.round(this.audioMasterVolume * 100);
+    if (this.pausePanelMode === 'control') {
+      this.pauseMenuBodyText.setText(
+        formatRaycastControlPauseBody(
+          {
+            controlStatus: this.gamepadInput.isConnected() ? 'DETECTADO' : 'SIN CONTROL',
+            selectionIndex: this.pauseControlSelectionIndex,
+            mouseSensitivity: `x${getMouseSensitivity(this.registry).toFixed(2)}`,
+            gamepadSensitivity: `x${getGamepadSensitivity(this.registry).toFixed(2)}`,
+            leftDeadzone: getGamepadLeftDeadzone(this.registry).toFixed(2),
+            rightDeadzone: getGamepadRightDeadzone(this.registry).toFixed(2),
+            invertY: getGamepadInvertY(this.registry) ? 'SÍ' : 'NO',
+            vibration: getGamepadVibrationEnabled(this.registry) ? 'SÍ' : 'NO',
+            screenshake: getScreenshakeEnabled(this.registry) ? 'SÍ' : 'NO',
+            minimap: getMinimapDefaultVisible(this.registry) ? 'SÍ' : 'NO'
+          },
+          { columnChars: 31 }
+        )
+      );
+      return;
+    }
     const objectiveState = this.getObjectiveState();
     const objective = this.getEventAwareObjectiveText(
       formatRaycastObjectiveHudLabel(buildRaycastCurrentObjective(objectiveState), this.currentLevel.hudObjectiveLabels)
@@ -1903,6 +2028,54 @@ export class RaycastScene extends Phaser.Scene {
         { columnChars: 28 }
       )
     );
+  }
+
+  private getWrappedControlSelectionIndex(delta: number): number {
+    const maxIndex = RAYCAST_CONTROL_PAUSE_ROWS.length - 1;
+    const selectableMin = 1;
+    const current = Math.max(selectableMin, Math.min(this.pauseControlSelectionIndex, maxIndex));
+    const next = current + delta;
+    if (next > maxIndex) return selectableMin;
+    if (next < selectableMin) return maxIndex;
+    return next;
+  }
+
+  private adjustControlSetting(direction: number): void {
+    const row = RAYCAST_CONTROL_PAUSE_ROWS[this.pauseControlSelectionIndex];
+    const flip = (value: boolean): boolean => !value;
+    switch (row) {
+      case 'mouse':
+        setMouseSensitivity(this.registry, getMouseSensitivity(this.registry) + direction * 0.05);
+        break;
+      case 'pad_sens':
+        setGamepadSensitivity(this.registry, getGamepadSensitivity(this.registry) + direction * 0.05);
+        break;
+      case 'left_deadzone':
+        setGamepadLeftDeadzone(this.registry, getGamepadLeftDeadzone(this.registry) + direction * 0.01);
+        break;
+      case 'right_deadzone':
+        setGamepadRightDeadzone(this.registry, getGamepadRightDeadzone(this.registry) + direction * 0.01);
+        break;
+      case 'invert_y':
+        setGamepadInvertY(this.registry, flip(getGamepadInvertY(this.registry)));
+        break;
+      case 'vibration':
+        setGamepadVibrationEnabled(this.registry, flip(getGamepadVibrationEnabled(this.registry)));
+        break;
+      case 'screenshake':
+        setScreenshakeEnabled(this.registry, flip(getScreenshakeEnabled(this.registry)));
+        break;
+      case 'minimap':
+        setMinimapDefaultVisible(this.registry, flip(getMinimapDefaultVisible(this.registry)));
+        break;
+      case 'back':
+        this.closeControlSettingsPanel();
+        return;
+      default:
+        return;
+    }
+    this.audioFeedback.play('uiConfirm', 0.62, this.time.now);
+    this.refreshPauseMenuBody();
   }
 
   private adjustAudioMasterVolume(delta: number): void {

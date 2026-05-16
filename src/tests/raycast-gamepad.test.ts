@@ -39,8 +39,10 @@ describe('raycast gamepad input', () => {
 
   it('maps standard buttons and sticks into a readable frame', () => {
     const frame = readRaycastGamepadFrame(makePad([0, 7, 9], [0.42, -0.66, 0.25, 0.5]), {
-      deadzone: 0.18,
+      leftDeadzone: 0.18,
+      rightDeadzone: 0.18,
       lookSensitivity: 1.15,
+      invertLookY: false,
       vibrationEnabled: false
     });
 
@@ -54,6 +56,21 @@ describe('raycast gamepad input', () => {
     expect(frame.look.x).toBeGreaterThan(0);
   });
 
+  it('supports distinct movement/look deadzones and inverted look Y', () => {
+    const frame = readRaycastGamepadFrame(makePad([], [0.22, -0.1, 0.32, -0.52]), {
+      leftDeadzone: 0.2,
+      rightDeadzone: 0.18,
+      lookSensitivity: 1,
+      invertLookY: true,
+      vibrationEnabled: false
+    });
+
+    expect(frame.move.x).toBeGreaterThan(0);
+    expect(frame.move.y).toBeCloseTo(0);
+    expect(frame.look.x).toBeGreaterThan(0);
+    expect(frame.look.y).toBeLessThan(0);
+  });
+
   it('tracks pressed vs held transitions and falls back safely without a pad', () => {
     const pads: Array<ArrayLike<Gamepad | null>> = [
       [makePad([0])],
@@ -64,7 +81,13 @@ describe('raycast gamepad input', () => {
     let index = 0;
     const input = new RaycastGamepadInput({
       getGamepads: () => pads[index++] ?? [],
-      getSettings: () => ({ deadzone: 0.18, lookSensitivity: 1, vibrationEnabled: false }),
+      getSettings: () => ({
+        leftDeadzone: 0.18,
+        rightDeadzone: 0.18,
+        lookSensitivity: 1,
+        invertLookY: false,
+        vibrationEnabled: false
+      }),
       enableBrowserEvents: false,
       getNow: () => index * 100
     });
@@ -89,7 +112,13 @@ describe('raycast gamepad input', () => {
   it('reports disconnected state cleanly when no pads are available', () => {
     const input = new RaycastGamepadInput({
       getGamepads: () => [],
-      getSettings: () => ({ deadzone: 0.18, lookSensitivity: 1, vibrationEnabled: false }),
+      getSettings: () => ({
+        leftDeadzone: 0.18,
+        rightDeadzone: 0.18,
+        lookSensitivity: 1,
+        invertLookY: false,
+        vibrationEnabled: false
+      }),
       enableBrowserEvents: false
     });
 

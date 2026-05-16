@@ -1,7 +1,14 @@
 import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH } from '../dimensions';
 import { RAYCAST_CSS_WORLD2, RAYCAST_PALETTE } from '../raycast/RaycastPalette';
-import { ensureSessionSettings, getGamepadDeadzone, getGamepadSensitivity, getGamepadVibrationEnabled } from '../sessionSettings';
+import {
+  ensureSessionSettings,
+  getGamepadInvertY,
+  getGamepadLeftDeadzone,
+  getGamepadRightDeadzone,
+  getGamepadSensitivity,
+  getGamepadVibrationEnabled
+} from '../sessionSettings';
 import { RaycastGamepadInput } from '../systems/RaycastGamepadInput';
 
 /** Pantalla de bloqueo cuando no está disponible el arco del Mundo 2. */
@@ -17,8 +24,10 @@ export class RaycastWorldLockedScene extends Phaser.Scene {
     ensureSessionSettings(this.registry);
     this.gamepadInput = new RaycastGamepadInput({
       getSettings: () => ({
-        deadzone: getGamepadDeadzone(this.registry),
+        leftDeadzone: getGamepadLeftDeadzone(this.registry),
+        rightDeadzone: getGamepadRightDeadzone(this.registry),
         lookSensitivity: getGamepadSensitivity(this.registry),
+        invertLookY: getGamepadInvertY(this.registry),
         vibrationEnabled: getGamepadVibrationEnabled(this.registry)
       })
     });

@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   ensureSessionSettings,
+  getGamepadInvertY,
+  getGamepadLeftDeadzone,
   getGamepadDeadzone,
+  getGamepadRightDeadzone,
   getGamepadSensitivity,
   getGamepadVibrationEnabled,
   getMinimapDefaultVisible,
@@ -9,13 +12,19 @@ import {
   getScreenshakeEnabled,
   getSessionMasterVolume,
   SESSION_GAMEPAD_DEADZONE_KEY,
+  SESSION_GAMEPAD_INVERT_Y_KEY,
   SESSION_GAMEPAD_SENS_KEY,
   SESSION_GAMEPAD_VIBRATION_KEY,
+  SESSION_GAMEPAD_LEFT_DEADZONE_KEY,
+  SESSION_GAMEPAD_RIGHT_DEADZONE_KEY,
   SESSION_MASTER_VOLUME_KEY,
   SESSION_MINIMAP_DEFAULT_KEY,
   SESSION_MOUSE_SENS_KEY,
   SESSION_SCREENSHAKE_KEY,
+  setGamepadInvertY,
+  setGamepadLeftDeadzone,
   setGamepadDeadzone,
+  setGamepadRightDeadzone,
   setGamepadSensitivity,
   setGamepadVibrationEnabled,
   setMinimapDefaultVisible,
@@ -42,7 +51,10 @@ describe('session registry settings', () => {
     expect(getMouseSensitivity(r)).toBe(1);
     expect(getSessionMasterVolume(r)).toBeCloseTo(0.85);
     expect(getGamepadSensitivity(r)).toBe(1);
+    expect(getGamepadLeftDeadzone(r)).toBeCloseTo(0.18);
     expect(getGamepadDeadzone(r)).toBeCloseTo(0.18);
+    expect(getGamepadRightDeadzone(r)).toBeCloseTo(0.18);
+    expect(getGamepadInvertY(r)).toBe(false);
     expect(getGamepadVibrationEnabled(r)).toBe(false);
     expect(getScreenshakeEnabled(r)).toBe(true);
     expect(getMinimapDefaultVisible(r)).toBe(true);
@@ -67,10 +79,21 @@ describe('session registry settings', () => {
     setGamepadSensitivity(r, 0.1);
     expect(getGamepadSensitivity(r)).toBe(0.35);
 
+    setGamepadLeftDeadzone(r, 0.01);
+    expect(getGamepadLeftDeadzone(r)).toBe(0.05);
+    setGamepadLeftDeadzone(r, 1);
+    expect(getGamepadLeftDeadzone(r)).toBe(0.4);
+
     setGamepadDeadzone(r, 0.01);
-    expect(getGamepadDeadzone(r)).toBe(0.05);
+    expect(getGamepadRightDeadzone(r)).toBe(0.05);
     setGamepadDeadzone(r, 1);
-    expect(getGamepadDeadzone(r)).toBe(0.4);
+    expect(getGamepadRightDeadzone(r)).toBe(0.4);
+
+    setGamepadRightDeadzone(r, 0.12);
+    expect(getGamepadDeadzone(r)).toBe(0.12);
+
+    setGamepadInvertY(r, true);
+    expect(getGamepadInvertY(r)).toBe(true);
 
     setGamepadVibrationEnabled(r, true);
     expect(getGamepadVibrationEnabled(r)).toBe(true);
@@ -81,6 +104,9 @@ describe('session registry settings', () => {
       [SESSION_MOUSE_SENS_KEY]: 1.4,
       [SESSION_GAMEPAD_SENS_KEY]: 1.2,
       [SESSION_GAMEPAD_DEADZONE_KEY]: 0.2,
+      [SESSION_GAMEPAD_LEFT_DEADZONE_KEY]: 0.22,
+      [SESSION_GAMEPAD_RIGHT_DEADZONE_KEY]: 0.2,
+      [SESSION_GAMEPAD_INVERT_Y_KEY]: true,
       [SESSION_GAMEPAD_VIBRATION_KEY]: true,
       [SESSION_MASTER_VOLUME_KEY]: 0.4,
       [SESSION_SCREENSHAKE_KEY]: false,
@@ -89,7 +115,10 @@ describe('session registry settings', () => {
     ensureSessionSettings(r);
     expect(getMouseSensitivity(r)).toBe(1.4);
     expect(getGamepadSensitivity(r)).toBe(1.2);
+    expect(getGamepadLeftDeadzone(r)).toBe(0.22);
     expect(getGamepadDeadzone(r)).toBe(0.2);
+    expect(getGamepadRightDeadzone(r)).toBe(0.2);
+    expect(getGamepadInvertY(r)).toBe(true);
     expect(getGamepadVibrationEnabled(r)).toBe(true);
     expect(getSessionMasterVolume(r)).toBeCloseTo(0.4);
     expect(getScreenshakeEnabled(r)).toBe(false);
