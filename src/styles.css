@@ -9,6 +9,8 @@ body {
   overscroll-behavior: none;
   -webkit-user-select: none;
   user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
 }
 
 body {
@@ -26,15 +28,19 @@ body {
 #app {
   width: 100vw;
   height: 100vh;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   touch-action: none;
   overscroll-behavior: none;
+  overflow: hidden;
 }
 
 #app canvas {
   display: block;
+  position: relative;
+  z-index: 1;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
   border-radius: 10px;
   touch-action: none;

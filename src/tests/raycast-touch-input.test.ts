@@ -1,3 +1,4 @@
+import type Phaser from 'phaser';
 import { describe, expect, it } from 'vitest';
 import {
   collectRaycastTouchPressedActions,
@@ -10,8 +11,111 @@ import {
   normalizeRaycastTouchAxis,
   normalizeRaycastTouchStick,
   shouldRaycastTouchCaptureBackgroundPointer,
-  shouldShowRaycastTouchControls
+  shouldShowRaycastTouchControls,
+  RaycastTouchInput
 } from '../game/systems/RaycastTouchInput';
+
+type TouchButtonSpec = ReturnType<typeof buildRaycastTouchButtonSpecs>[number];
+
+type TouchButtonHarness = {
+  action: string;
+  rect: {
+    visible: boolean;
+    setVisible: (value: boolean) => TouchButtonHarness['rect'];
+    setAlpha: (value: number) => TouchButtonHarness['rect'];
+    setFillStyle: (color: number, alpha?: number) => TouchButtonHarness['rect'];
+    setStrokeStyle: (width: number, color: number, alpha?: number) => TouchButtonHarness['rect'];
+  };
+  label: {
+    setVisible: (value: boolean) => TouchButtonHarness['label'];
+    setAlpha: (value: number) => TouchButtonHarness['label'];
+  };
+  spec: TouchButtonSpec;
+  active: boolean;
+  pressed: boolean;
+  pointerId: number | null;
+};
+
+type TouchHarness = {
+  layout: ReturnType<typeof buildRaycastTouchLayout>;
+  active: boolean;
+  lastViewport: { width: number; height: number };
+  buttons: Map<string, TouchButtonHarness>;
+  queuedPressedActions: Set<string>;
+  activePointers: Map<number, { kind: string; pointerId: number }>;
+  processContactDown: (contact: { id: number; x: number; y: number; event?: Event }, event?: Event) => void;
+  processContactMove: (contact: { id: number; x: number; y: number; event?: Event }, event?: Event) => void;
+  processContactUp: (contact: { id: number; x: number; y: number; event?: Event }, event?: Event) => void;
+};
+
+function createDisplayObjectStub(text?: string) {
+  const stub: {
+    visible: boolean;
+    text?: string;
+    setOrigin: (x?: number, y?: number) => typeof stub;
+    setDepth: (depth?: number) => typeof stub;
+    setVisible: (value: boolean) => typeof stub;
+    setAlpha: (value: number) => typeof stub;
+    setFillStyle: (color: number, alpha?: number) => typeof stub;
+    setStrokeStyle: (width: number, color: number, alpha?: number) => typeof stub;
+    setPosition: (x: number, y: number) => typeof stub;
+    destroy: () => void;
+  } = {
+    visible: true,
+    text,
+    setOrigin: () => stub,
+    setDepth: () => stub,
+    setVisible: (value: boolean) => {
+      stub.visible = value;
+      return stub;
+    },
+    setAlpha: () => stub,
+    setFillStyle: () => stub,
+    setStrokeStyle: () => stub,
+    setPosition: () => stub,
+    destroy: () => undefined
+  };
+  return stub;
+}
+
+function createTouchSceneStub(width = 1024, height = 768): Phaser.Scene {
+  return {
+    scale: { width, height },
+    game: { canvas: { getBoundingClientRect: () => ({ left: 0, top: 0, width, height }) } },
+    sound: {
+      context: { state: 'running', resume: async () => undefined },
+      unlock: () => undefined
+    },
+    input: {
+      addPointer: () => undefined,
+      on: () => undefined,
+      off: () => undefined
+    },
+    add: {
+      text: (_x: number, _y: number, text?: string) => createDisplayObjectStub(text),
+      rectangle: () => createDisplayObjectStub(),
+      circle: () => createDisplayObjectStub()
+    }
+  } as unknown as Phaser.Scene;
+}
+
+function createButtonHarness(
+  spec: TouchButtonSpec,
+  rectOverrides: Partial<TouchButtonHarness['rect']> = {}
+): TouchButtonHarness {
+  const rect = createDisplayObjectStub() as TouchButtonHarness['rect'] & { visible: boolean };
+  const label = createDisplayObjectStub() as TouchButtonHarness['label'];
+  rect.visible = true;
+  return {
+    action: spec.action,
+    rect: Object.assign(rect, rectOverrides),
+    label,
+    spec,
+    active: true,
+    pressed: false,
+    pointerId: null
+  };
+}
 
 describe('raycast touch input', () => {
   it('normalizes joystick axes with a readable deadzone and capped magnitude', () => {
@@ -101,5 +205,108 @@ describe('raycast touch input', () => {
     expect(collected.has('fire')).toBe(true);
     expect(collected.has('reload')).toBe(true);
     expect(queue.size).toBe(0);
+  });
+
+  it('tracks a touch button press as a one-shot pressed action', () => {
+    const input = new RaycastTouchInput(createTouchSceneStub(), {
+      hasTouchCapability: () => true,
+      getViewport: () => ({ width: 1024, height: 768 }),
+      getSettings: () => ({
+        enabled: true,
+        buttonScale: 1,
+        lookSensitivity: 1,
+        joystickDeadzone: 0.18
+      })
+    });
+    const layout = buildRaycastTouchLayout(1024, 768, 1);
+    const fireButtonSpec = buildRaycastTouchButtonSpecs(layout, 'gameplay').find((button) => button.action === 'fire');
+    expect(fireButtonSpec).toBeDefined();
+
+    const harness = input as unknown as TouchHarness;
+    harness.layout = layout;
+    harness.active = true;
+    harness.lastViewport = { width: 1024, height: 768 };
+    harness.buttons = new Map([
+      [
+        'fire',
+        createButtonHarness(fireButtonSpec!, {
+          setVisible: (value: boolean) => {
+            const entry = harness.buttons.get('fire');
+            if (entry) entry.rect.visible = value;
+            return createDisplayObjectStub().setVisible(value) as TouchButtonHarness['rect'];
+          }
+        })
+      ]
+    ]);
+
+    harness.processContactDown({ id: 11, x: fireButtonSpec!.x, y: fireButtonSpec!.y });
+
+    expect(harness.queuedPressedActions.has('fire')).toBe(true);
+    input.update();
+    expect(input.consumePressed('fire')).toBe(true);
+    expect(input.consumePressed('fire')).toBe(false);
+    expect(harness.buttons.get('fire')?.pressed).toBe(true);
+  });
+
+  it('uses a fixed joystick base and resets to zero on release', () => {
+    const input = new RaycastTouchInput(createTouchSceneStub(), {
+      hasTouchCapability: () => true,
+      getViewport: () => ({ width: 1024, height: 768 }),
+      getSettings: () => ({
+        enabled: true,
+        buttonScale: 1,
+        lookSensitivity: 1,
+        joystickDeadzone: 0.18
+      })
+    });
+    const layout = buildRaycastTouchLayout(1024, 768, 1);
+    const harness = input as unknown as TouchHarness;
+    harness.layout = layout;
+    harness.active = true;
+    harness.lastViewport = { width: 1024, height: 768 };
+
+    harness.processContactDown({ id: 21, x: layout.joystickCenterX, y: layout.joystickCenterY });
+    harness.processContactMove({ id: 21, x: layout.joystickCenterX + layout.joystickRadius * 0.5, y: layout.joystickCenterY });
+
+    expect(input.getMoveInput().x).toBeGreaterThan(0);
+    expect(input.getMoveInput().x).toBeLessThan(1);
+
+    harness.processContactUp({ id: 21, x: layout.joystickCenterX, y: layout.joystickCenterY });
+    expect(input.getMoveInput()).toEqual({ x: 0, y: 0 });
+  });
+
+  it('separates joystick, look and button multitouch contacts', () => {
+    const input = new RaycastTouchInput(createTouchSceneStub(), {
+      hasTouchCapability: () => true,
+      getViewport: () => ({ width: 1024, height: 768 }),
+      getSettings: () => ({
+        enabled: true,
+        buttonScale: 1,
+        lookSensitivity: 1,
+        joystickDeadzone: 0.18
+      })
+    });
+    const layout = buildRaycastTouchLayout(1024, 768, 1);
+    const fireButtonSpec = buildRaycastTouchButtonSpecs(layout, 'gameplay').find((button) => button.action === 'fire');
+    expect(fireButtonSpec).toBeDefined();
+
+    const harness = input as unknown as TouchHarness;
+    harness.layout = layout;
+    harness.active = true;
+    harness.lastViewport = { width: 1024, height: 768 };
+    harness.buttons = new Map([
+      ['fire', createButtonHarness(fireButtonSpec!)]
+    ]);
+
+    harness.processContactDown({ id: 31, x: layout.joystickCenterX, y: layout.joystickCenterY });
+    harness.processContactDown({ id: 32, x: layout.width * 0.82, y: layout.height * 0.45 });
+    harness.processContactDown({ id: 33, x: fireButtonSpec!.x, y: fireButtonSpec!.y });
+
+    expect(harness.activePointers.get(31)?.kind).toBe('joystick');
+    expect(harness.activePointers.get(32)?.kind).toBe('look');
+    expect(harness.activePointers.get(33)?.kind).toBe('button');
+    expect(harness.queuedPressedActions.has('fire')).toBe(true);
+    input.update();
+    expect(input.consumePressed('fire')).toBe(true);
   });
 });

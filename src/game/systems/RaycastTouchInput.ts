@@ -84,6 +84,13 @@ interface TouchPointerState {
   lastY: number;
 }
 
+interface TouchContactPoint {
+  id: number;
+  x: number;
+  y: number;
+  event?: Event;
+}
+
 const TOUCH_MAX_LOOK_DELTA_RADIANS = Math.PI * 0.33;
 const TOUCH_MAX_LOOK_PIXEL_DELTA = 96;
 const TOUCH_MIN_LOOK_PIXEL_DELTA = 1.75;
@@ -216,7 +223,7 @@ export function buildRaycastTouchButtonSpecs(layout: RaycastTouchLayout, mode: R
       { action: 'fire', label: 'DISPARAR', x: actionX, y: clusterY, width: s * 1.25, height: s * 1.25 },
       { action: 'reload', label: 'RECARGAR', x: secondX, y: clusterY, width: s * 1.15, height: s * 1.15 },
       { action: 'pause', label: 'PAUSA', x: thirdX, y: clusterY, width: s * 1.05, height: s * 1.05 },
-      { action: 'toggleMap', label: 'MAPA', x: fourthX, y: clusterY, width: s * 1.0, height: s * 1.0 },
+      { action: 'toggleMap', label: 'MINIMAPA', x: fourthX, y: clusterY, width: s * 1.0, height: s * 1.0 },
       { action: 'weapon3', label: '3', x: actionX, y: topY, width: s * 0.8, height: s * 0.8 },
       { action: 'weapon2', label: '2', x: secondX, y: topY, width: s * 0.8, height: s * 0.8 },
       { action: 'weapon1', label: '1', x: thirdX, y: topY, width: s * 0.8, height: s * 0.8 },
@@ -297,6 +304,8 @@ export class RaycastTouchInput {
   private readonly overlay = new Set<Phaser.GameObjects.GameObject>();
   private readonly buttons = new Map<RaycastTouchAction, TouchButtonState>();
   private readonly activePointers = new Map<number, TouchPointerState>();
+  private canvasElement: HTMLCanvasElement | null = null;
+  private domListenersAttached = false;
   private joystickBase: Phaser.GameObjects.Arc | null = null;
   private joystickThumb: Phaser.GameObjects.Arc | null = null;
   private currentMove: MovementVector = { x: 0, y: 0 };
@@ -313,15 +322,8 @@ export class RaycastTouchInput {
   private lastViewport = { width: 0, height: 0 };
   private wasTouchVisible = false;
   private wasPortraitPrompt = false;
-  private readonly handlePointerDown = (pointer: Phaser.Input.Pointer): void => {
-    this.processPointerDown(pointer);
-  };
-  private readonly handlePointerMove = (pointer: Phaser.Input.Pointer): void => {
-    this.processPointerMove(pointer);
-  };
-  private readonly handlePointerUp = (pointer: Phaser.Input.Pointer): void => {
-    this.processPointerUp(pointer);
-  };
+  private lastDomContactSignature: string | null = null;
+  private lastDomContactAt = 0;
   private readonly handleWindowBlur = (): void => {
     this.resetActiveContactState();
   };
@@ -343,6 +345,42 @@ export class RaycastTouchInput {
   private readonly handlePageShow = (): void => {
     this.resetActiveContactState();
     this.suppressLookInput(2);
+  };
+  private readonly handleDomPointerDown = (event: PointerEvent): void => {
+    if (event.pointerType !== 'touch') return;
+    const contact = this.getContactPointFromClient(event.pointerId, event.clientX, event.clientY, event);
+    if (this.shouldSkipDuplicateDomContact('down', contact.x, contact.y)) return;
+    this.processContactDown(contact, event);
+  };
+  private readonly handleDomPointerMove = (event: PointerEvent): void => {
+    if (event.pointerType !== 'touch') return;
+    const contact = this.getContactPointFromClient(event.pointerId, event.clientX, event.clientY, event);
+    if (this.shouldSkipDuplicateDomContact('move', contact.x, contact.y)) return;
+    this.processContactMove(contact, event);
+  };
+  private readonly handleDomPointerUp = (event: PointerEvent): void => {
+    if (event.pointerType !== 'touch') return;
+    const contact = this.getContactPointFromClient(event.pointerId, event.clientX, event.clientY, event);
+    if (this.shouldSkipDuplicateDomContact('up', contact.x, contact.y)) return;
+    this.processContactUp(contact, event);
+  };
+  private readonly handleDomPointerCancel = (event: PointerEvent): void => {
+    if (event.pointerType !== 'touch') return;
+    const contact = this.getContactPointFromClient(event.pointerId, event.clientX, event.clientY, event);
+    if (this.shouldSkipDuplicateDomContact('cancel', contact.x, contact.y)) return;
+    this.processContactUp(contact, event);
+  };
+  private readonly handleDomTouchStart = (event: TouchEvent): void => {
+    this.handleTouchListEvent(event, 'start');
+  };
+  private readonly handleDomTouchMove = (event: TouchEvent): void => {
+    this.handleTouchListEvent(event, 'move');
+  };
+  private readonly handleDomTouchEnd = (event: TouchEvent): void => {
+    this.handleTouchListEvent(event, 'end');
+  };
+  private readonly handleDomTouchCancel = (event: TouchEvent): void => {
+    this.handleTouchListEvent(event, 'cancel');
   };
 
   constructor(scene: Phaser.Scene, options: RaycastTouchInputOptions = {}) {
@@ -369,10 +407,7 @@ export class RaycastTouchInput {
 
   create(): void {
     this.scene.input.addPointer(3);
-    this.scene.input.on('pointerdown', this.handlePointerDown);
-    this.scene.input.on('pointermove', this.handlePointerMove);
-    this.scene.input.on('pointerup', this.handlePointerUp);
-    this.scene.input.on('gameout', this.handlePointerUp);
+    this.bindTouchListeners();
     if (typeof window !== 'undefined') {
       window.addEventListener('blur', this.handleWindowBlur);
       window.addEventListener('focus', this.handleWindowFocus);
@@ -388,10 +423,7 @@ export class RaycastTouchInput {
   }
 
   destroy(): void {
-    this.scene.input.off('pointerdown', this.handlePointerDown);
-    this.scene.input.off('pointermove', this.handlePointerMove);
-    this.scene.input.off('pointerup', this.handlePointerUp);
-    this.scene.input.off('gameout', this.handlePointerUp);
+    this.unbindTouchListeners();
     if (typeof window !== 'undefined') {
       window.removeEventListener('blur', this.handleWindowBlur);
       window.removeEventListener('focus', this.handleWindowFocus);
@@ -751,11 +783,6 @@ export class RaycastTouchInput {
     this.showAudioPrompt(false);
   }
 
-  private maybePreventDefault(pointer: Phaser.Input.Pointer, capturedOverlayGesture: boolean): void {
-    if (!shouldRaycastTouchPreventDefault(this.mode, capturedOverlayGesture)) return;
-    if (pointer.event && typeof pointer.event.preventDefault === 'function') pointer.event.preventDefault();
-  }
-
   private releaseCapturedPointers(): void {
     const canvas = this.scene.game.canvas;
     for (const pointerId of this.activePointers.keys()) {
@@ -778,43 +805,43 @@ export class RaycastTouchInput {
     }
   }
 
-  private processPointerDown(pointer: Phaser.Input.Pointer): void {
-    if (!isTouchLikePointer(pointer)) return;
+  private processContactDown(contact: TouchContactPoint, event?: Event): void {
     this.unlockAudio();
     if (!this.active || this.layout.portraitPrompt) return;
 
-    const x = pointer.x;
-    const y = pointer.y;
+    const x = contact.x;
+    const y = contact.y;
     const button = this.findButtonAt(x, y);
     if (button) {
-      this.maybePreventDefault(pointer, true);
-      this.activateButton(button, pointer.id);
+      if (shouldRaycastTouchPreventDefault(this.mode, true)) this.suppressDomEvent(event);
+      this.activateButton(button, contact.id);
       return;
     }
 
     if (!shouldRaycastTouchCaptureBackgroundPointer(this.mode, false)) return;
 
-    this.maybePreventDefault(pointer, true);
+    if (shouldRaycastTouchPreventDefault(this.mode, true)) this.suppressDomEvent(event);
 
     if (this.mode === 'gameplay') {
       if (this.isLikelyPalmRestTouch(x, y)) return;
-      const leftZone = x <= this.layout.width * 0.34;
-      if (leftZone) {
+      if (this.isJoystickActivationZone(x, y)) {
         if (this.countPointers('joystick') >= TOUCH_MAX_JOYSTICK_POINTERS) return;
-        this.activePointers.set(pointer.id, {
+        this.activePointers.set(contact.id, {
           kind: 'joystick',
-          pointerId: pointer.id,
-          originX: x,
-          originY: y,
+          pointerId: contact.id,
+          originX: this.layout.joystickCenterX,
+          originY: this.layout.joystickCenterY,
           lastX: x,
           lastY: y
         });
+        this.currentMove = this.computeJoystickVector(this.getSettings().joystickDeadzone);
+        this.updateJoystickThumb();
         return;
       }
       if (this.countPointers('look') >= TOUCH_MAX_LOOK_POINTERS) return;
-      this.activePointers.set(pointer.id, {
+      this.activePointers.set(contact.id, {
         kind: 'look',
-        pointerId: pointer.id,
+        pointerId: contact.id,
         originX: x,
         originY: y,
         lastX: x,
@@ -823,33 +850,31 @@ export class RaycastTouchInput {
     }
   }
 
-  private processPointerMove(pointer: Phaser.Input.Pointer): void {
-    if (!isTouchLikePointer(pointer)) return;
+  private processContactMove(contact: TouchContactPoint, event?: Event): void {
     if (!this.active || this.layout.portraitPrompt) return;
-    const state = this.activePointers.get(pointer.id);
+    const state = this.activePointers.get(contact.id);
     if (!state) return;
-    this.maybePreventDefault(pointer, true);
+    if (shouldRaycastTouchPreventDefault(this.mode, true)) this.suppressDomEvent(event);
     if (state.kind === 'joystick') {
-      state.lastX = pointer.x;
-      state.lastY = pointer.y;
+      state.lastX = contact.x;
+      state.lastY = contact.y;
       this.currentMove = this.computeJoystickVector(this.getSettings().joystickDeadzone);
       this.updateJoystickThumb();
       return;
     }
 
     if (this.lookSuppressionFrames > 0) {
-      state.lastX = pointer.x;
-      state.lastY = pointer.y;
+      state.lastX = contact.x;
+      state.lastY = contact.y;
       this.currentLook = { x: 0, y: 0 };
       return;
     }
 
-    const deltaX = pointer.x - state.lastX;
-    const deltaY = pointer.y - state.lastY;
-    state.lastX = pointer.x;
-    state.lastY = pointer.y;
+    const deltaX = contact.x - state.lastX;
+    const deltaY = contact.y - state.lastY;
+    state.lastX = contact.x;
+    state.lastY = contact.y;
     if (Math.abs(deltaX) < TOUCH_MIN_LOOK_PIXEL_DELTA && Math.abs(deltaY) < TOUCH_MIN_LOOK_PIXEL_DELTA) {
-      this.currentLook = { x: 0, y: 0 };
       return;
     }
     const sensitivity = this.getSettings().lookSensitivity;
@@ -858,14 +883,15 @@ export class RaycastTouchInput {
     this.queuedLook.y += clampRaycastTouchLookDelta(clampPixels(deltaY) * sensitivity * TOUCH_DEFAULT_LOOK_SENSITIVITY);
   }
 
-  private processPointerUp(pointer: Phaser.Input.Pointer): void {
-    const state = this.activePointers.get(pointer.id);
+  private processContactUp(contact: TouchContactPoint, event?: Event): void {
+    const state = this.activePointers.get(contact.id);
+    if (state && shouldRaycastTouchPreventDefault(this.mode, true)) this.suppressDomEvent(event);
     if (!state) return;
     if (state.kind === 'button' && state.action) {
       const button = this.buttons.get(state.action);
       if (button) button.pressed = false;
     }
-    this.activePointers.delete(pointer.id);
+    this.activePointers.delete(contact.id);
     this.recomputeTouchState();
   }
 
@@ -935,6 +961,134 @@ export class RaycastTouchInput {
     this.joystickThumb.setAlpha(this.active ? 0.92 : 0.45);
     this.joystickBase.setAlpha(this.active ? 0.55 : 0.3);
   }
+
+  private isJoystickActivationZone(x: number, y: number): boolean {
+    const dx = x - this.layout.joystickCenterX;
+    const dy = y - this.layout.joystickCenterY;
+    const activationRadius = this.layout.joystickRadius * 1.35;
+    return Math.hypot(dx, dy) <= activationRadius && x <= this.layout.width * 0.42;
+  }
+
+  private bindTouchListeners(): void {
+    if (this.domListenersAttached) return;
+    this.canvasElement = this.getCanvasElement();
+    if (!this.canvasElement) {
+      this.scene.input.on('pointerdown', this.handlePhaserPointerDown);
+      this.scene.input.on('pointermove', this.handlePhaserPointerMove);
+      this.scene.input.on('pointerup', this.handlePhaserPointerUp);
+      this.scene.input.on('gameout', this.handlePhaserPointerUp);
+      return;
+    }
+
+    const target = this.canvasElement;
+    target.addEventListener('pointerdown', this.handleDomPointerDown, { capture: true, passive: false });
+    target.addEventListener('pointermove', this.handleDomPointerMove, { capture: true, passive: false });
+    target.addEventListener('pointerup', this.handleDomPointerUp, { capture: true, passive: false });
+    target.addEventListener('pointercancel', this.handleDomPointerCancel, { capture: true, passive: false });
+    target.addEventListener('touchstart', this.handleDomTouchStart, { capture: true, passive: false });
+    target.addEventListener('touchmove', this.handleDomTouchMove, { capture: true, passive: false });
+    target.addEventListener('touchend', this.handleDomTouchEnd, { capture: true, passive: false });
+    target.addEventListener('touchcancel', this.handleDomTouchCancel, { capture: true, passive: false });
+    this.domListenersAttached = true;
+  }
+
+  private unbindTouchListeners(): void {
+    if (this.canvasElement) {
+      const target = this.canvasElement;
+      target.removeEventListener('pointerdown', this.handleDomPointerDown, true);
+      target.removeEventListener('pointermove', this.handleDomPointerMove, true);
+      target.removeEventListener('pointerup', this.handleDomPointerUp, true);
+      target.removeEventListener('pointercancel', this.handleDomPointerCancel, true);
+      target.removeEventListener('touchstart', this.handleDomTouchStart, true);
+      target.removeEventListener('touchmove', this.handleDomTouchMove, true);
+      target.removeEventListener('touchend', this.handleDomTouchEnd, true);
+      target.removeEventListener('touchcancel', this.handleDomTouchCancel, true);
+    } else {
+      this.scene.input.off('pointerdown', this.handlePhaserPointerDown);
+      this.scene.input.off('pointermove', this.handlePhaserPointerMove);
+      this.scene.input.off('pointerup', this.handlePhaserPointerUp);
+      this.scene.input.off('gameout', this.handlePhaserPointerUp);
+    }
+    this.canvasElement = null;
+    this.domListenersAttached = false;
+  }
+
+  private getCanvasElement(): HTMLCanvasElement | null {
+    const canvas = this.scene.game?.canvas;
+    return typeof HTMLCanvasElement !== 'undefined' && canvas instanceof HTMLCanvasElement ? canvas : null;
+  }
+
+  private getContactPointFromClient(id: number, clientX: number, clientY: number, event?: Event): TouchContactPoint {
+    const canvas = this.canvasElement ?? this.getCanvasElement();
+    if (!canvas) {
+      return { id, x: clientX, y: clientY, event };
+    }
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = rect.width > 0 ? this.layout.width / rect.width : 1;
+    const scaleY = rect.height > 0 ? this.layout.height / rect.height : 1;
+    return {
+      id,
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY,
+      event
+    };
+  }
+
+  private handleTouchListEvent(event: TouchEvent, phase: 'start' | 'move' | 'end' | 'cancel'): void {
+    if (!event.changedTouches.length) return;
+    this.suppressDomEvent(event);
+    const touches = Array.from(event.changedTouches);
+    const signaturePhase: 'down' | 'move' | 'up' | 'cancel' =
+      phase === 'start' ? 'down' : phase === 'end' ? 'up' : phase;
+    for (const touch of touches) {
+      const contact = this.getContactPointFromClient(touch.identifier, touch.clientX, touch.clientY, event);
+      if (this.shouldSkipDuplicateDomContact(signaturePhase, contact.x, contact.y)) continue;
+      if (phase === 'start') this.processContactDown(contact, event);
+      else if (phase === 'move') this.processContactMove(contact, event);
+      else this.processContactUp(contact, event);
+    }
+  }
+
+  private suppressDomEvent(event?: Event): void {
+    if (!event) return;
+    if (typeof event.preventDefault === 'function') event.preventDefault();
+    if (typeof event.stopPropagation === 'function') event.stopPropagation();
+    if (typeof (event as Event & { stopImmediatePropagation?: () => void }).stopImmediatePropagation === 'function') {
+      (event as Event & { stopImmediatePropagation?: () => void }).stopImmediatePropagation?.();
+    }
+  }
+
+  private shouldSkipDuplicateDomContact(phase: 'down' | 'move' | 'up' | 'cancel', x: number, y: number): boolean {
+    const signature = `${phase}:${Math.round(x / 4)}:${Math.round(y / 4)}`;
+    const now = this.getNow();
+    if (this.lastDomContactSignature === signature && now - this.lastDomContactAt < 48) {
+      return true;
+    }
+    this.lastDomContactSignature = signature;
+    this.lastDomContactAt = now;
+    return false;
+  }
+
+  private readonly handlePhaserPointerDown = (pointer: Phaser.Input.Pointer): void => {
+    if (!isTouchLikePointer(pointer)) return;
+    const nativeEvent = pointer.event as PointerEvent | undefined;
+    const contact = this.getContactPointFromClient(pointer.id, nativeEvent?.clientX ?? pointer.x, nativeEvent?.clientY ?? pointer.y, pointer.event);
+    this.processContactDown(contact, pointer.event);
+  };
+
+  private readonly handlePhaserPointerMove = (pointer: Phaser.Input.Pointer): void => {
+    if (!isTouchLikePointer(pointer)) return;
+    const nativeEvent = pointer.event as PointerEvent | undefined;
+    const contact = this.getContactPointFromClient(pointer.id, nativeEvent?.clientX ?? pointer.x, nativeEvent?.clientY ?? pointer.y, pointer.event);
+    this.processContactMove(contact, pointer.event);
+  };
+
+  private readonly handlePhaserPointerUp = (pointer: Phaser.Input.Pointer): void => {
+    if (!isTouchLikePointer(pointer)) return;
+    const nativeEvent = pointer.event as PointerEvent | undefined;
+    const contact = this.getContactPointFromClient(pointer.id, nativeEvent?.clientX ?? pointer.x, nativeEvent?.clientY ?? pointer.y, pointer.event);
+    this.processContactUp(contact, pointer.event);
+  };
 
   private buildActionMessage(action: RaycastTouchAction): string {
     switch (action) {
