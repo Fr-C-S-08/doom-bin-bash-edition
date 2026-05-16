@@ -221,6 +221,10 @@ import {
   getSessionMasterVolume,
   setSessionMasterVolume
 } from '../sessionSettings';
+import { NetClient } from '../net/NetClient';
+import { NetState } from '../net/NetState';
+import type { SnapshotMessage } from '../../../shared/protocol';
+import { TICK_INTERVAL_MS } from '../../../shared/constants';
 
 interface RaycastSceneData {
   levelId?: string;
@@ -237,6 +241,13 @@ interface RaycastSceneData {
   rewardTier?: number;
   /** Optional pre-run/world roulette modifier. */
   runModifierId?: RunModifierId | null;
+  // --- Multiplayer (Phase 2+) ---
+  /** When true, the scene connects to a WebSocket server and enters co-op mode. */
+  netMode?: boolean;
+  /** WebSocket URL of the co-op server (e.g. "ws://192.168.1.10:8080"). */
+  serverUrl?: string;
+  /** Player display name shown to other clients. */
+  playerName?: string;
 }
 
 const DIRECTOR_SPAWN_TELEGRAPH_MS = 820;
@@ -408,6 +419,13 @@ export class RaycastScene extends Phaser.Scene {
   private flashBlindUntil = 0;
   private lastDevShortcutAt = 0;
   private nextBossAddSpawnAt = 0;
+
+  // --- Multiplayer (Phase 2+) ---
+  /** Null when running in single-player mode. */
+  private netClient: NetClient | null = null;
+  private netState: NetState | null = null;
+  private netConnected = false;
+  private netInputThrottle = 0; // ms accumulator to throttle input sends to ~20 Hz
 
   private readonly handleExitToMenu = (): void => {
     if (!this.isRaycastSceneActive()) return;
@@ -653,6 +671,30 @@ export class RaycastScene extends Phaser.Scene {
     this.campaignMetrics = data.carryCampaignMetrics ?? createEmptyCampaignMetrics();
     this.rewardTier = Math.max(0, data.rewardTier ?? 0);
     this.runModifier = getRunModifierById(data.runModifierId ?? null);
+    // Multiplayer: stash net params; actual connect happens in create()
+    if (data.netMode && data.serverUrl) {
+      this.netClient = new NetClient();
+      this.netState = new NetState();
+      this.netConnected = false;
+      this.netInputThrottle = 0;
+      const playerName = data.playerName ?? 'Player';
+      const serverUrl = data.serverUrl;
+      // Connect asynchronously; single-player runs fine in the meantime
+      this.netClient.connect(serverUrl, playerName).then(() => {
+        if (!this.netClient || !this.netState) return;
+        this.netState.localPlayerId = this.netClient.playerId;
+        this.netClient.on<SnapshotMessage>('snapshot', (snap) => {
+          this.netState?.applySnapshot(snap);
+        });
+        this.netConnected = true;
+      }).catch((err: unknown) => {
+        console.warn('[RaycastScene] multiplayer connect failed:', err);
+      });
+    } else {
+      this.netClient = null;
+      this.netState = null;
+      this.netConnected = false;
+    }
   }
 
   create(): void {
@@ -1109,11 +1151,23 @@ export class RaycastScene extends Phaser.Scene {
       this.updateBlackoutPulse();
       this.updateBossArenaHazards();
       this.applyPassiveHeal(delta);
+      // Multiplayer: send input at ~20 Hz to match server tick rate
+      if (this.netConnected && this.netClient) {
+        this.netInputThrottle += delta;
+        if (this.netInputThrottle >= TICK_INTERVAL_MS) {
+          this.netInputThrottle -= TICK_INTERVAL_MS;
+          this.netClient.sendInput(this.player.x, this.player.y, this.player.angle, []);
+        }
+      }
     }
     const atmosphere = this.getAtmosphereOptions();
     this.raycastRenderer.render(this.player, GAME_WIDTH, GAME_HEIGHT, atmosphere);
     this.refreshBillboardCache();
-    this.raycastRenderer.renderBillboards(this.player, this.cachedBillboards, GAME_WIDTH, GAME_HEIGHT);
+    // Multiplayer: concatenate remote player billboards with level billboards
+    const allBillboards = this.netConnected && this.netState
+      ? [...this.cachedBillboards, ...this.buildRemotePlayerBillboards()]
+      : this.cachedBillboards;
+    this.raycastRenderer.renderBillboards(this.player, allBillboards, GAME_WIDTH, GAME_HEIGHT);
     this.raycastRenderer.renderEnemies(this.player, this.enemies, GAME_WIDTH, GAME_HEIGHT, this.time.now, atmosphere);
     this.bossStates.forEach((boss) => {
       this.raycastRenderer.renderBoss(this.player, boss, GAME_WIDTH, GAME_HEIGHT, this.time.now, atmosphere);
@@ -1323,6 +1377,11 @@ export class RaycastScene extends Phaser.Scene {
     this.controller?.destroy();
     this.cleanupInputListeners();
     this.killUiTweens();
+    // Multiplayer: close WebSocket if open
+    this.netClient?.disconnect();
+    this.netClient = null;
+    this.netState = null;
+    this.netConnected = false;
   }
 
   private cleanupInputListeners(): void {
@@ -2526,6 +2585,27 @@ export class RaycastScene extends Phaser.Scene {
     }));
 
     return [...keyBillboards, ...doorBillboards, ...secretBillboards, ...healthBillboards, ...exitBillboards];
+  }
+
+  /**
+   * Multiplayer (Phase 2+): converts remote PlayerState entries from the last
+   * server snapshot into RaycastBillboards so the renderer can draw them as
+   * colored circles in the 3D view.  Each remote player is rendered as a cyan
+   * circle (0x00d9ff) with their name as the label — same depth-sorted pipeline
+   * as keys, doors and health packs.  No style glyph is applied (undefined),
+   * so only the base circle is drawn, keeping the visual minimal and distinct
+   * from enemy silhouettes.
+   */
+  private buildRemotePlayerBillboards(): RaycastBillboard[] {
+    if (!this.netState) return [];
+    return this.netState.getRemotePlayers().map((p) => ({
+      x: p.x,
+      y: p.y,
+      color: 0x00d9ff,  // bright cyan — distinct from all enemy and pickup colors
+      radius: 0.28,     // slightly smaller than a GRUNT (0.29) for readability
+      label: p.name.slice(0, 8).toUpperCase()
+      // style intentionally omitted: renders as plain circle with no glyph
+    }));
   }
 
   private renderMinimapThrottled(): void {

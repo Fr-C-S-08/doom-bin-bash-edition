@@ -8,13 +8,18 @@ export class NetClient {
   private inputSeq = 0;
   playerId: string | null = null;
 
-  connect(url: string): Promise<void> {
+  /**
+   * Opens the WebSocket, sends a hello message with the given name, and
+   * resolves when the server responds with a welcome (playerId assigned).
+   */
+  connect(url: string, name: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(url);
       this.ws = ws;
 
       ws.addEventListener('open', () => {
-        // nothing yet — wait for welcome
+        // Send hello as soon as the socket is open; server replies with welcome
+        ws.send(JSON.stringify({ type: 'hello', name }));
       });
 
       ws.addEventListener('message', (event) => {
