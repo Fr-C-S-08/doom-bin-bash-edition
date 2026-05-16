@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  collectRaycastTouchPressedActions,
   buildRaycastTouchButtonSpecs,
   buildRaycastTouchLayout,
   clampRaycastTouchLookDelta,
   clearRaycastTouchTransientState,
+  computeRaycastTouchJoystickVector,
   isRaycastTouchPortrait,
   normalizeRaycastTouchAxis,
   normalizeRaycastTouchStick,
@@ -25,6 +27,16 @@ describe('raycast touch input', () => {
   it('clamps touch look deltas to prevent huge camera spikes', () => {
     expect(clampRaycastTouchLookDelta(99)).toBeLessThan(Math.PI * 0.33 + 0.0001);
     expect(clampRaycastTouchLookDelta(-99)).toBeGreaterThan(-(Math.PI * 0.33) - 0.0001);
+  });
+
+  it('returns proportional joystick vectors and resets cleanly at the center', () => {
+    const halfPush = computeRaycastTouchJoystickVector(100, 100, 140, 100, 80, 0.18);
+    const fullPush = computeRaycastTouchJoystickVector(100, 100, 220, 100, 80, 0.18);
+    const centered = computeRaycastTouchJoystickVector(100, 100, 100, 100, 80, 0.18);
+
+    expect(halfPush.x).toBeGreaterThan(0);
+    expect(fullPush.x).toBeCloseTo(1, 3);
+    expect(centered).toEqual({ x: 0, y: 0 });
   });
 
   it('builds a clean gameplay layout and ui layout for tablet use', () => {
@@ -80,5 +92,14 @@ describe('raycast touch input', () => {
     expect(
       shouldShowRaycastTouchControls({ enabled: false, maxTouchPoints: 5, width: 1024, height: 768 })
     ).toBe(false);
+  });
+
+  it('collects pressed touch actions once per frame without losing queued taps', () => {
+    const queue = new Set(['fire', 'reload'] as const);
+    const collected = collectRaycastTouchPressedActions(queue);
+
+    expect(collected.has('fire')).toBe(true);
+    expect(collected.has('reload')).toBe(true);
+    expect(queue.size).toBe(0);
   });
 });

@@ -130,6 +130,33 @@ export function clampRaycastTouchLookDelta(deltaRadians: number, maxDeltaRadians
   return cap === 0 ? 0 : clamp(deltaRadians, -cap, cap);
 }
 
+export function computeRaycastTouchJoystickVector(
+  originX: number,
+  originY: number,
+  currentX: number,
+  currentY: number,
+  radius: number,
+  deadzone = TOUCH_DEFAULT_JOYSTICK_DEADZONE
+): MovementVector {
+  const safeRadius = Math.max(1, radius);
+  const dx = currentX - originX;
+  const dy = currentY - originY;
+  const magnitude = Math.hypot(dx, dy);
+  if (magnitude === 0) return { x: 0, y: 0 };
+  const clampedMagnitude = Math.min(1, magnitude / safeRadius);
+  const eased = normalizeRaycastTouchAxis(clampedMagnitude, deadzone);
+  if (eased === 0) return { x: 0, y: 0 };
+  const x = clamp((dx / magnitude) * eased, -1, 1);
+  const y = clamp((dy / magnitude) * eased, -1, 1);
+  return { x, y };
+}
+
+export function collectRaycastTouchPressedActions(queue: Set<RaycastTouchAction>): Set<RaycastTouchAction> {
+  const actions = new Set(queue);
+  queue.clear();
+  return actions;
+}
+
 export function isRaycastTouchPortrait(width: number, height: number): boolean {
   return height > width;
 }
@@ -270,8 +297,12 @@ export class RaycastTouchInput {
   private readonly overlay = new Set<Phaser.GameObjects.GameObject>();
   private readonly buttons = new Map<RaycastTouchAction, TouchButtonState>();
   private readonly activePointers = new Map<number, TouchPointerState>();
+  private joystickBase: Phaser.GameObjects.Arc | null = null;
+  private joystickThumb: Phaser.GameObjects.Arc | null = null;
   private currentMove: MovementVector = { x: 0, y: 0 };
   private currentLook: MovementVector = { x: 0, y: 0 };
+  private queuedLook: MovementVector = { x: 0, y: 0 };
+  private queuedPressedActions = new Set<RaycastTouchAction>();
   private heldActions = new Set<RaycastTouchAction>();
   private pressedActions = new Set<RaycastTouchAction>();
   private statusMessage: string | null = null;
@@ -337,6 +368,7 @@ export class RaycastTouchInput {
   }
 
   create(): void {
+    this.scene.input.addPointer(3);
     this.scene.input.on('pointerdown', this.handlePointerDown);
     this.scene.input.on('pointermove', this.handlePointerMove);
     this.scene.input.on('pointerup', this.handlePointerUp);
@@ -384,6 +416,7 @@ export class RaycastTouchInput {
   /** Drop active contacts when pausing, losing focus, or rebuilding overlay. */
   resetActiveContactState(): void {
     this.smoothedLookX = 0;
+    this.queuedLook = { x: 0, y: 0 };
     this.releaseCapturedPointers();
     clearRaycastTouchTransientState({
       activePointers: this.activePointers,
@@ -397,7 +430,7 @@ export class RaycastTouchInput {
   }
 
   update(): void {
-    this.pressedActions.clear();
+    this.pressedActions = collectRaycastTouchPressedActions(this.queuedPressedActions);
     const viewport = this.getViewport();
     const settings = this.getSettings();
     const touchVisible = this.shouldDisplayTouchControls(settings, viewport.width, viewport.height);
@@ -441,13 +474,23 @@ export class RaycastTouchInput {
     this.updateButtonVisuals();
 
     if (this.lookSuppressionFrames > 0) this.lookSuppressionFrames -= 1;
-    this.currentMove = this.computeJoystickVector();
+    this.currentMove = this.computeJoystickVector(settings.joystickDeadzone);
     if (this.lookSuppressionFrames > 0) {
       this.currentLook = { x: 0, y: 0 };
       this.smoothedLookX = 0;
+      this.queuedLook = { x: 0, y: 0 };
     } else if (!Array.from(this.activePointers.values()).some((pointer) => pointer.kind === 'look')) {
       this.currentLook = { x: 0, y: 0 };
       this.smoothedLookX = 0;
+    } else {
+      const queued = { ...this.queuedLook };
+      this.queuedLook = { x: 0, y: 0 };
+      const rawLookX = clampRaycastTouchLookDelta(queued.x);
+      this.smoothedLookX += (rawLookX - this.smoothedLookX) * TOUCH_LOOK_SMOOTH_ALPHA;
+      this.currentLook = {
+        x: this.smoothedLookX,
+        y: queued.y
+      };
     }
   }
 
@@ -583,6 +626,8 @@ export class RaycastTouchInput {
     }
     this.overlay.clear();
     this.buttons.clear();
+    this.joystickBase = null;
+    this.joystickThumb = null;
   }
 
   private createGameplayJoystick(): void {
@@ -594,8 +639,11 @@ export class RaycastTouchInput {
       .circle(this.layout.joystickCenterX, this.layout.joystickCenterY, Math.max(16, Math.round(this.layout.joystickRadius * 0.35)), 0x58f2e4, 0.78)
       .setStrokeStyle(1, 0x020408, 0.82)
       .setDepth(92);
+    this.joystickBase = outer;
+    this.joystickThumb = inner;
     this.overlay.add(outer);
     this.overlay.add(inner);
+    this.updateJoystickThumb();
   }
 
   private createGameplayLookHint(): void {
@@ -661,6 +709,7 @@ export class RaycastTouchInput {
         button.rect.setStrokeStyle(2, 0x6bf2d5, 0.5);
       }
     }
+    this.updateJoystickThumb();
   }
 
   private showPortraitPrompt(visible: boolean): void {
@@ -679,9 +728,17 @@ export class RaycastTouchInput {
     }
   }
 
-  private computeJoystickVector(): MovementVector {
-    const hasJoystick = Array.from(this.activePointers.values()).some((pointer) => pointer.kind === 'joystick');
-    return hasJoystick ? { ...this.currentMove } : { x: 0, y: 0 };
+  private computeJoystickVector(deadzone: number): MovementVector {
+    const joystick = Array.from(this.activePointers.values()).find((pointer) => pointer.kind === 'joystick');
+    if (!joystick) return { x: 0, y: 0 };
+    return computeRaycastTouchJoystickVector(
+      joystick.originX,
+      joystick.originY,
+      joystick.lastX,
+      joystick.lastY,
+      this.layout.joystickRadius,
+      deadzone
+    );
   }
 
   private unlockAudio(): void {
@@ -773,19 +830,10 @@ export class RaycastTouchInput {
     if (!state) return;
     this.maybePreventDefault(pointer, true);
     if (state.kind === 'joystick') {
-      const dx = pointer.x - state.originX;
-      const dy = pointer.y - state.originY;
-      const radius = Math.max(1, this.layout.joystickRadius);
-      const magnitude = Math.hypot(dx, dy);
-      const clampMag = Math.min(1, magnitude / radius);
-      const normalizedX = magnitude === 0 ? 0 : dx / magnitude;
-      const normalizedY = magnitude === 0 ? 0 : dy / magnitude;
-      const deadzone = this.getSettings().joystickDeadzone;
-      const eased = normalizeRaycastTouchAxis(clampMag, deadzone);
-      this.currentMove = {
-        x: clamp(normalizedX * eased, -1, 1),
-        y: clamp(normalizedY * eased, -1, 1)
-      };
+      state.lastX = pointer.x;
+      state.lastY = pointer.y;
+      this.currentMove = this.computeJoystickVector(this.getSettings().joystickDeadzone);
+      this.updateJoystickThumb();
       return;
     }
 
@@ -804,13 +852,10 @@ export class RaycastTouchInput {
       this.currentLook = { x: 0, y: 0 };
       return;
     }
+    const sensitivity = this.getSettings().lookSensitivity;
     const clampPixels = (value: number): number => clamp(value, -TOUCH_MAX_LOOK_PIXEL_DELTA, TOUCH_MAX_LOOK_PIXEL_DELTA);
-    const rawLookX = clampRaycastTouchLookDelta(clampPixels(deltaX) * TOUCH_DEFAULT_LOOK_SENSITIVITY);
-    this.smoothedLookX += (rawLookX - this.smoothedLookX) * TOUCH_LOOK_SMOOTH_ALPHA;
-    this.currentLook = {
-      x: this.smoothedLookX,
-      y: 0
-    };
+    this.queuedLook.x += clampRaycastTouchLookDelta(clampPixels(deltaX) * sensitivity * TOUCH_DEFAULT_LOOK_SENSITIVITY);
+    this.queuedLook.y += clampRaycastTouchLookDelta(clampPixels(deltaY) * sensitivity * TOUCH_DEFAULT_LOOK_SENSITIVITY);
   }
 
   private processPointerUp(pointer: Phaser.Input.Pointer): void {
@@ -827,8 +872,9 @@ export class RaycastTouchInput {
   private activateButton(button: TouchButtonState, pointerId: number): void {
     button.pressed = true;
     button.pointerId = pointerId;
-    this.pressedActions.add(button.action);
+    this.queuedPressedActions.add(button.action);
     this.heldActions.add(button.action);
+    this.pushStatusMessage(this.buildActionMessage(button.action), 900);
     this.activePointers.set(pointerId, {
       kind: 'button',
       action: button.action,
@@ -849,12 +895,23 @@ export class RaycastTouchInput {
   }
 
   private recomputeTouchState(): void {
-    const hasJoystick = Array.from(this.activePointers.values()).some((pointer) => pointer.kind === 'joystick');
+    const joystick = Array.from(this.activePointers.values()).find((pointer) => pointer.kind === 'joystick');
     const hasLook = Array.from(this.activePointers.values()).some((pointer) => pointer.kind === 'look');
-    this.currentMove = this.mode === 'gameplay' && hasJoystick ? this.currentMove : { x: 0, y: 0 };
+    this.currentMove =
+      this.mode === 'gameplay' && joystick
+        ? computeRaycastTouchJoystickVector(
+            joystick.originX,
+            joystick.originY,
+            joystick.lastX,
+            joystick.lastY,
+            this.layout.joystickRadius,
+            this.getSettings().joystickDeadzone
+          )
+        : { x: 0, y: 0 };
     if (!hasLook || this.mode !== 'gameplay') {
       this.currentLook = { x: 0, y: 0 };
       this.smoothedLookX = 0;
+      this.queuedLook = { x: 0, y: 0 };
     }
     for (const button of this.buttons.values()) {
       if (button.pointerId === null) continue;
@@ -864,6 +921,55 @@ export class RaycastTouchInput {
         button.pressed = false;
         this.heldActions.delete(button.action);
       }
+    }
+    this.updateJoystickThumb();
+  }
+
+  private updateJoystickThumb(): void {
+    if (!this.joystickThumb || !this.joystickBase) return;
+    const travel = this.layout.joystickRadius * 0.62;
+    this.joystickThumb.setPosition(
+      this.layout.joystickCenterX + this.currentMove.x * travel,
+      this.layout.joystickCenterY + this.currentMove.y * travel
+    );
+    this.joystickThumb.setAlpha(this.active ? 0.92 : 0.45);
+    this.joystickBase.setAlpha(this.active ? 0.55 : 0.3);
+  }
+
+  private buildActionMessage(action: RaycastTouchAction): string {
+    switch (action) {
+      case 'fire':
+        return 'TOUCH: DISPARAR';
+      case 'reload':
+        return 'TOUCH: RECARGAR';
+      case 'pause':
+        return 'TOUCH: PAUSA';
+      case 'toggleMap':
+        return 'TOUCH: MINIMAPA';
+      case 'weapon1':
+        return 'TOUCH: ARMA 1';
+      case 'weapon2':
+        return 'TOUCH: ARMA 2';
+      case 'weapon3':
+        return 'TOUCH: ARMA 3';
+      case 'confirm':
+        return 'TOUCH: CONFIRMAR';
+      case 'cancel':
+        return 'TOUCH: VOLVER';
+      case 'nextWeapon':
+        return 'TOUCH: SIGUIENTE ARMA';
+      case 'previousWeapon':
+        return 'TOUCH: ARMA ANTERIOR';
+      case 'navUp':
+        return 'TOUCH: ARRIBA';
+      case 'navDown':
+        return 'TOUCH: ABAJO';
+      case 'navLeft':
+        return 'TOUCH: IZQUIERDA';
+      case 'navRight':
+        return 'TOUCH: DERECHA';
+      default:
+        return 'TOUCH: ACCIÓN';
     }
   }
 }
