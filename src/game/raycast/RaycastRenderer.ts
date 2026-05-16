@@ -87,17 +87,17 @@ export class RaycastRenderer {
   private readonly billboardProjectionScratch: BillboardProjection[] = [];
 
   constructor(
-  scene: Phaser.Scene,
-  private readonly map: RaycastMap,
-  private readonly level: RaycastLevel = RAYCAST_LEVEL,
-  private readonly config = RAYCAST_RENDERER_CONFIG
+    scene: Phaser.Scene,
+    private readonly map: RaycastMap,
+    private readonly level: RaycastLevel = RAYCAST_LEVEL,
+    private readonly config = RAYCAST_RENDERER_CONFIG
   ) {
     this.scene = scene;
     this.graphics = scene.add.graphics();
     this.weaponSprite = scene.add.image(0, 0, RAYCAST_OPTIONAL_TEXTURE_KEYS.weaponPistol);
     this.weaponSprite.setVisible(false);
     this.weaponSprite.setOrigin(0.5, 1);
-    this.weaponSprite.setDepth(1000);
+    this.weaponSprite.setDepth(9);
     this.depthBuffer = new Array(this.config.rayCount);
     for (let i = 0; i < PROJECTION_POOL_CAP; i += 1) {
       this.enemyProjectionScratch.push({
@@ -474,13 +474,13 @@ export class RaycastRenderer {
   }
 
   private prepareWeaponTexture(textureKey: string): void {
-  if (this.preparedWeaponTextureKeys.has(textureKey)) return;
+    if (this.preparedWeaponTextureKeys.has(textureKey)) return;
 
-  const texture = this.scene.textures.get(textureKey);
-  texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
+    const texture = this.scene.textures.get(textureKey);
+    texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
 
-  this.preparedWeaponTextureKeys.add(textureKey);
-}
+    this.preparedWeaponTextureKeys.add(textureKey);
+  }
   private getWeaponTextureKey(weapon: WeaponKind): string | null {
     switch (weapon) {
       case 'PISTOL':
@@ -499,7 +499,7 @@ export class RaycastRenderer {
     const { x: recoilX, y: recoilY } = this.weaponRecoilOffset(weapon, kick);
     const baseY = height - 18 + recoilY;
     const cx = width * 0.5 + recoilX;
-        const weaponTextureKey = this.getWeaponTextureKey(weapon);
+    const weaponTextureKey = this.getWeaponTextureKey(weapon);
     const hasWeaponSprite =
       weaponTextureKey !== null && raycastTextureExists(this.scene, weaponTextureKey);
 
@@ -524,7 +524,7 @@ export class RaycastRenderer {
           weapon === 'PISTOL' ? height + 78 + recoilY : height + 18 + recoilY
         )
         .setDisplaySize(displaySize * kickScale, displaySize * kickScale)
-        .setDepth(1000);
+        .setDepth(9);
 
       return;
     }
