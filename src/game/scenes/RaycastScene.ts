@@ -215,6 +215,7 @@ import {
 import { getBillboardColor } from '../raycast/RaycastVisualTheme';
 import { getRaycastBossLevelId, resolveRaycastBossShortcutLevelId, type RaycastBossShortcutSlot } from '../raycast/RaycastBossShortcuts';
 import { RaycastGamepadInput } from '../systems/RaycastGamepadInput';
+import { RaycastTouchInput } from '../systems/RaycastTouchInput';
 import { palette } from '../theme/palette';
 import {
   ensureSessionSettings,
@@ -227,6 +228,10 @@ import {
   getMouseSensitivity,
   getScreenshakeEnabled,
   getSessionMasterVolume,
+  getTouchButtonScale,
+  getTouchControlsEnabled,
+  getTouchJoystickDeadzone,
+  getTouchLookSensitivity,
   setGamepadInvertY,
   setGamepadLeftDeadzone,
   setGamepadRightDeadzone,
@@ -276,6 +281,7 @@ export class RaycastScene extends Phaser.Scene {
   private raycastRenderer!: RaycastRenderer;
   private controller!: RaycastPlayerController;
   private gamepadInput!: RaycastGamepadInput;
+  private touchInput!: RaycastTouchInput;
   private combat!: RaycastCombatSystem;
   private audioFeedback!: AudioFeedbackSystem;
   private gameDirector!: GameDirector;
@@ -492,7 +498,8 @@ export class RaycastScene extends Phaser.Scene {
     this.scene.start('RaycastWorldLockedScene');
   };
 
-  private readonly handleFireInput = (): void => {
+  private readonly handleFireInput = (pointer?: Phaser.Input.Pointer): void => {
+    if (pointer && (pointer.event as PointerEvent | undefined)?.pointerType === 'touch') return;
     if (this.gamePaused) return;
     this.fireWeapon();
   };
@@ -639,8 +646,9 @@ export class RaycastScene extends Phaser.Scene {
     this.adjustControlSetting(1);
   };
 
-  private readonly handlePauseMenuPointerDown = (): void => {
+  private readonly handlePauseMenuPointerDown = (pointer?: Phaser.Input.Pointer): void => {
     if (!this.gamePaused) return;
+    if (pointer && (pointer.event as PointerEvent | undefined)?.pointerType === 'touch') return;
     this.handlePauseMenuConfirm();
   };
 
@@ -739,6 +747,16 @@ export class RaycastScene extends Phaser.Scene {
         vibrationEnabled: getGamepadVibrationEnabled(this.registry)
       })
     });
+    this.touchInput = new RaycastTouchInput(this, {
+      mode: 'gameplay',
+      getSettings: () => ({
+        enabled: getTouchControlsEnabled(this.registry),
+        buttonScale: getTouchButtonScale(this.registry),
+        lookSensitivity: getTouchLookSensitivity(this.registry),
+        joystickDeadzone: getTouchJoystickDeadzone(this.registry)
+      })
+    });
+    this.touchInput.create();
     this.raycastRenderer = new RaycastRenderer(this, this.map, this.currentLevel);
     this.controller = new RaycastPlayerController(
       this,
@@ -747,6 +765,7 @@ export class RaycastScene extends Phaser.Scene {
       RAYCAST_MOVEMENT,
       () => getMouseSensitivity(this.registry),
       this.gamepadInput,
+      this.touchInput,
       () => !this.gamePaused
     );
     this.controller.create();
@@ -1173,6 +1192,7 @@ export class RaycastScene extends Phaser.Scene {
 
   update(_time: number, delta: number): void {
     this.pollGamepadInput();
+    this.pollTouchInput();
     this.combat?.tick(this.time.now);
     if (this.playerAlive && !this.levelComplete && !this.gamePaused) {
       this.controller.update(delta);
@@ -1324,6 +1344,48 @@ export class RaycastScene extends Phaser.Scene {
     }
   }
 
+  private pollTouchInput(): void {
+    if (!this.touchInput) return;
+    this.touchInput.update();
+    const touchMessage = this.touchInput.consumeStatusMessage();
+    if (touchMessage) {
+      this.setCombatMessage(touchMessage, 1400);
+      this.controller?.suppressLookInput(2);
+    }
+
+    if (this.touchInput.consumePressed('toggleMap')) this.handleToggleMinimap();
+    if (this.touchInput.consumePressed('pause')) this.handleEscKey();
+    if (this.touchInput.consumePressed('cancel')) {
+      if (this.gamePaused) {
+        if (this.pausePanelMode === 'control') this.closeControlSettingsPanel();
+        else this.closePauseMenu();
+      } else {
+        this.handleEscKey();
+      }
+    }
+
+    if (this.touchInput.consumePressed('confirm')) {
+      if (this.gamePaused) {
+        this.handlePauseMenuConfirm();
+      } else if (this.levelComplete) {
+        if (!this.episodeComplete && this.nextLevelId !== null) this.handleAdvanceLevel();
+        else this.restartCurrentLevel();
+      }
+    }
+
+    if (this.touchInput.consumePressed('reload')) this.handleRetry();
+    if (this.touchInput.consumePressed('fire')) this.handleFireInput();
+    if (this.touchInput.consumePressed('weapon1')) this.handleWeaponSlotOne();
+    if (this.touchInput.consumePressed('weapon2')) this.handleWeaponSlotTwo();
+    if (this.touchInput.consumePressed('weapon3')) this.handleWeaponSlotThree();
+    if (this.touchInput.consumePressed('nextWeapon')) this.cycleWeapon(1);
+    if (this.touchInput.consumePressed('previousWeapon')) this.cycleWeapon(-1);
+    if (this.touchInput.consumePressed('navUp')) this.handlePauseMenuUp();
+    if (this.touchInput.consumePressed('navDown')) this.handlePauseMenuDown();
+    if (this.touchInput.consumePressed('navLeft')) this.handlePauseMenuLeft();
+    if (this.touchInput.consumePressed('navRight')) this.handlePauseMenuRight();
+  }
+
   private resetRuntimeState(): void {
     this.player = {
       x: this.currentLevel.playerStart.x,
@@ -1468,6 +1530,7 @@ export class RaycastScene extends Phaser.Scene {
     if (!this.sceneReady && !this.inputListenersRegistered) return;
     this.sceneReady = false;
     this.gamepadInput?.destroy();
+    this.touchInput?.destroy();
     this.controller?.destroy();
     this.cleanupInputListeners();
     this.killUiTweens();
@@ -1934,6 +1997,7 @@ export class RaycastScene extends Phaser.Scene {
     this.gamePaused = true;
     this.pauseSelectionIndex = 0;
     this.pausePanelMode = 'main';
+    this.touchInput?.setMode('ui');
     this.pauseDim.setVisible(true);
     this.pausePanel.setVisible(true);
     this.pauseTitleText.setVisible(true);
@@ -1948,6 +2012,7 @@ export class RaycastScene extends Phaser.Scene {
     this.gamePaused = false;
     this.pausePanelMode = 'main';
     this.pauseControlSelectionIndex = 1;
+    this.touchInput?.setMode('gameplay');
     this.pauseDim.setVisible(false);
     this.pausePanel.setVisible(false);
     this.pauseTitleText.setVisible(false);
@@ -1960,6 +2025,7 @@ export class RaycastScene extends Phaser.Scene {
   private openControlSettingsPanel(): void {
     this.pausePanelMode = 'control';
     this.pauseControlSelectionIndex = 1;
+    this.touchInput?.setMode('ui');
     this.controller?.suppressLookInput(2);
     this.refreshPauseMenuBody();
     this.audioFeedback.play('uiConfirm', 0.68, this.time.now);
@@ -1968,6 +2034,7 @@ export class RaycastScene extends Phaser.Scene {
   private closeControlSettingsPanel(): void {
     this.pausePanelMode = 'main';
     this.pauseSelectionIndex = Math.min(this.pauseSelectionIndex, RAYCAST_PAUSE_MENU_LABELS.length - 1);
+    this.touchInput?.setMode('ui');
     this.controller?.suppressLookInput(2);
     this.refreshPauseMenuBody();
     this.audioFeedback.play('uiConfirm', 0.68, this.time.now);

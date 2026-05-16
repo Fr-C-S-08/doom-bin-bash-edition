@@ -15,10 +15,15 @@ import {
   getGamepadLeftDeadzone,
   getGamepadRightDeadzone,
   getGamepadSensitivity,
-  getGamepadVibrationEnabled
+  getGamepadVibrationEnabled,
+  getTouchButtonScale,
+  getTouchControlsEnabled,
+  getTouchJoystickDeadzone,
+  getTouchLookSensitivity
 } from '../sessionSettings';
 import { getRaycastBossLevelId, type RaycastBossShortcutSlot } from '../raycast/RaycastBossShortcuts';
 import { RaycastGamepadInput } from '../systems/RaycastGamepadInput';
+import { RaycastTouchInput } from '../systems/RaycastTouchInput';
 
 const BG = RAYCAST_PALETTE.voidBlack;
 const BODY_COLOR = RAYCAST_CSS.bodyText;
@@ -37,6 +42,7 @@ export class PrologueScene extends Phaser.Scene {
   private promptText!: Phaser.GameObjects.Text;
   private gamepadStatusText!: Phaser.GameObjects.Text;
   private gamepadInput!: RaycastGamepadInput;
+  private touchInput!: RaycastTouchInput;
   private inputListenersRegistered = false;
 
   private readonly handleContinueRaycast = (): void => {
@@ -106,6 +112,15 @@ export class PrologueScene extends Phaser.Scene {
         lookSensitivity: getGamepadSensitivity(this.registry),
         invertLookY: getGamepadInvertY(this.registry),
         vibrationEnabled: getGamepadVibrationEnabled(this.registry)
+      })
+    });
+    this.touchInput = new RaycastTouchInput(this, {
+      mode: 'ui',
+      getSettings: () => ({
+        enabled: getTouchControlsEnabled(this.registry),
+        buttonScale: getTouchButtonScale(this.registry),
+        lookSensitivity: getTouchLookSensitivity(this.registry),
+        joystickDeadzone: getTouchJoystickDeadzone(this.registry)
       })
     });
 
@@ -233,15 +248,37 @@ export class PrologueScene extends Phaser.Scene {
     this.cameras.main.fadeIn(520, 0, 0, 0);
 
     this.registerInputListeners();
+    this.touchInput.create();
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.cleanupInputListeners, this);
     this.events.once(Phaser.Scenes.Events.DESTROY, this.cleanupInputListeners, this);
   }
 
   update(): void {
     this.gamepadInput.update();
-    this.gamepadStatusText.setText(this.gamepadInput.isConnected() ? 'CONTROL · DETECTADO' : 'CONTROL · SIN CONTROL');
-    this.gamepadStatusText.setAlpha(this.gamepadInput.isConnected() ? 0.9 : 0.72);
+    this.touchInput.update();
+    const touchMessage = this.touchInput.consumeStatusMessage();
+    if (touchMessage) {
+      this.gamepadStatusText.setText(touchMessage);
+      this.gamepadStatusText.setAlpha(0.92);
+    } else {
+      this.gamepadStatusText.setText(this.gamepadInput.isConnected() ? 'CONTROL · DETECTADO' : 'CONTROL · SIN CONTROL');
+      this.gamepadStatusText.setAlpha(this.gamepadInput.isConnected() ? 0.9 : 0.72);
+    }
 
+    if (this.touchInput.consumePressed('confirm') || this.touchInput.consumePressed('pause')) {
+      this.handleContinueRaycast();
+      return;
+    }
+    if (this.touchInput.consumePressed('cancel')) {
+      this.handleBackToMenu();
+      return;
+    }
+    if (this.touchInput.consumePressed('navRight') || this.touchInput.consumePressed('nextWeapon')) {
+      this.shiftModifier(1);
+    }
+    if (this.touchInput.consumePressed('navLeft') || this.touchInput.consumePressed('previousWeapon')) {
+      this.shiftModifier(-1);
+    }
     if (this.gamepadInput.consumePressed('confirm') || this.gamepadInput.consumePressed('pause')) {
       this.handleContinueRaycast();
       return;
@@ -300,6 +337,7 @@ export class PrologueScene extends Phaser.Scene {
     kb?.off('keydown-SIX', this.handlePrologueBossThree);
     kb?.off('keydown-ESC', this.handleBackToMenu);
     this.gamepadInput?.destroy();
+    this.touchInput?.destroy();
 
     this.inputListenersRegistered = false;
   }

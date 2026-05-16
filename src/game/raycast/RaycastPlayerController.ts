@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import type { RaycastMap } from './RaycastMap';
 import type { RaycastGamepadInput } from '../systems/RaycastGamepadInput';
+import type { RaycastTouchInput } from '../systems/RaycastTouchInput';
 import {
   applyRaycastMouseTurn,
   getCameraRelativeInput,
@@ -31,9 +32,10 @@ export class RaycastPlayerController {
     private readonly map: RaycastMap,
     private readonly state: RaycastPlayerState,
     private readonly config: RaycastMovementConfig = RAYCAST_MOVEMENT,
-    private readonly getMouseSensitivityMul?: () => number,
-    private readonly gamepadInput?: RaycastGamepadInput,
-    private readonly isLookCaptureAllowed?: () => boolean
+  private readonly getMouseSensitivityMul?: () => number,
+  private readonly gamepadInput?: RaycastGamepadInput,
+  private readonly touchInput?: RaycastTouchInput,
+  private readonly isLookCaptureAllowed?: () => boolean
   ) {}
 
   create(): void {
@@ -57,14 +59,17 @@ export class RaycastPlayerController {
     const deltaSeconds = deltaMs / 1000;
     const gamepadMove = this.gamepadInput?.getMoveInput() ?? { x: 0, y: 0 };
     const gamepadLook = this.lookSuppressionFrames > 0 ? { x: 0, y: 0 } : this.gamepadInput?.getLookInput() ?? { x: 0, y: 0 };
+    const touchMove = this.touchInput?.getMoveInput() ?? { x: 0, y: 0 };
+    const touchLook = this.lookSuppressionFrames > 0 ? { x: 0, y: 0 } : this.touchInput?.getLookInput() ?? { x: 0, y: 0 };
     const turnInput =
       Number(this.cursors.right.isDown || this.keys.E.isDown) -
       Number(this.cursors.left.isDown || this.keys.Q.isDown) +
-      gamepadLook.x;
+      gamepadLook.x +
+      touchLook.x;
     this.state.angle += Phaser.Math.Clamp(turnInput, -1, 1) * moveConfig.turnSpeed * deltaSeconds;
 
-    const forwardInput = Number(this.keys.W.isDown) - Number(this.keys.S.isDown) + gamepadMove.y;
-    const strafeInput = Number(this.keys.D.isDown) - Number(this.keys.A.isDown) + gamepadMove.x;
+    const forwardInput = Number(this.keys.W.isDown) - Number(this.keys.S.isDown) + gamepadMove.y + touchMove.y;
+    const strafeInput = Number(this.keys.D.isDown) - Number(this.keys.A.isDown) + gamepadMove.x + touchMove.x;
     const movementInput = getCameraRelativeInput(forwardInput, strafeInput, this.state.angle, moveConfig);
     this.state.velocity = updateRaycastVelocity(this.state.velocity, movementInput, deltaMs, moveConfig);
     const movedState = moveWithWallSlide(this.map, this.state, deltaMs, moveConfig);

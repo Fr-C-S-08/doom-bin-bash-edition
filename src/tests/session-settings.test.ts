@@ -11,6 +11,10 @@ import {
   getMouseSensitivity,
   getScreenshakeEnabled,
   getSessionMasterVolume,
+  getTouchButtonScale,
+  getTouchControlsEnabled,
+  getTouchJoystickDeadzone,
+  getTouchLookSensitivity,
   SESSION_GAMEPAD_DEADZONE_KEY,
   SESSION_GAMEPAD_INVERT_Y_KEY,
   SESSION_GAMEPAD_SENS_KEY,
@@ -21,6 +25,10 @@ import {
   SESSION_MINIMAP_DEFAULT_KEY,
   SESSION_MOUSE_SENS_KEY,
   SESSION_SCREENSHAKE_KEY,
+  SESSION_TOUCH_BUTTON_SCALE_KEY,
+  SESSION_TOUCH_CONTROLS_KEY,
+  SESSION_TOUCH_JOYSTICK_DEADZONE_KEY,
+  SESSION_TOUCH_LOOK_SENS_KEY,
   setGamepadInvertY,
   setGamepadLeftDeadzone,
   setGamepadDeadzone,
@@ -31,6 +39,10 @@ import {
   setMouseSensitivity,
   setScreenshakeEnabled,
   setSessionMasterVolume,
+  setTouchButtonScale,
+  setTouchControlsEnabled,
+  setTouchJoystickDeadzone,
+  setTouchLookSensitivity,
   type SessionRegistry
 } from '../game/sessionSettings';
 
@@ -58,6 +70,10 @@ describe('session registry settings', () => {
     expect(getGamepadVibrationEnabled(r)).toBe(false);
     expect(getScreenshakeEnabled(r)).toBe(true);
     expect(getMinimapDefaultVisible(r)).toBe(true);
+    expect(getTouchControlsEnabled(r)).toBe(true);
+    expect(getTouchLookSensitivity(r)).toBe(1);
+    expect(getTouchButtonScale(r)).toBe(1);
+    expect(getTouchJoystickDeadzone(r)).toBeCloseTo(0.18);
 
     setMouseSensitivity(r, 9);
     expect(getMouseSensitivity(r)).toBe(2.25);
@@ -97,6 +113,21 @@ describe('session registry settings', () => {
 
     setGamepadVibrationEnabled(r, true);
     expect(getGamepadVibrationEnabled(r)).toBe(true);
+
+    setTouchControlsEnabled(r, false);
+    expect(getTouchControlsEnabled(r)).toBe(false);
+    setTouchLookSensitivity(r, 9);
+    expect(getTouchLookSensitivity(r)).toBe(2.2);
+    setTouchLookSensitivity(r, 0.1);
+    expect(getTouchLookSensitivity(r)).toBe(0.45);
+    setTouchButtonScale(r, 9);
+    expect(getTouchButtonScale(r)).toBe(1.4);
+    setTouchButtonScale(r, 0.1);
+    expect(getTouchButtonScale(r)).toBe(0.8);
+    setTouchJoystickDeadzone(r, 0.01);
+    expect(getTouchJoystickDeadzone(r)).toBe(0.05);
+    setTouchJoystickDeadzone(r, 1);
+    expect(getTouchJoystickDeadzone(r)).toBe(0.4);
   });
 
   it('does not overwrite explicit registry values', () => {
@@ -110,7 +141,11 @@ describe('session registry settings', () => {
       [SESSION_GAMEPAD_VIBRATION_KEY]: true,
       [SESSION_MASTER_VOLUME_KEY]: 0.4,
       [SESSION_SCREENSHAKE_KEY]: false,
-      [SESSION_MINIMAP_DEFAULT_KEY]: false
+      [SESSION_MINIMAP_DEFAULT_KEY]: false,
+      [SESSION_TOUCH_CONTROLS_KEY]: false,
+      [SESSION_TOUCH_LOOK_SENS_KEY]: 1.1,
+      [SESSION_TOUCH_BUTTON_SCALE_KEY]: 1.2,
+      [SESSION_TOUCH_JOYSTICK_DEADZONE_KEY]: 0.24
     });
     ensureSessionSettings(r);
     expect(getMouseSensitivity(r)).toBe(1.4);
@@ -123,5 +158,9 @@ describe('session registry settings', () => {
     expect(getSessionMasterVolume(r)).toBeCloseTo(0.4);
     expect(getScreenshakeEnabled(r)).toBe(false);
     expect(getMinimapDefaultVisible(r)).toBe(false);
+    expect(getTouchControlsEnabled(r)).toBe(false);
+    expect(getTouchLookSensitivity(r)).toBe(1.1);
+    expect(getTouchButtonScale(r)).toBe(1.2);
+    expect(getTouchJoystickDeadzone(r)).toBe(0.24);
   });
 });

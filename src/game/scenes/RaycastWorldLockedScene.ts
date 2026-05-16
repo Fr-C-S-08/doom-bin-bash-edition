@@ -7,13 +7,19 @@ import {
   getGamepadLeftDeadzone,
   getGamepadRightDeadzone,
   getGamepadSensitivity,
-  getGamepadVibrationEnabled
+  getGamepadVibrationEnabled,
+  getTouchButtonScale,
+  getTouchControlsEnabled,
+  getTouchJoystickDeadzone,
+  getTouchLookSensitivity
 } from '../sessionSettings';
 import { RaycastGamepadInput } from '../systems/RaycastGamepadInput';
+import { RaycastTouchInput } from '../systems/RaycastTouchInput';
 
 /** Pantalla de bloqueo cuando no está disponible el arco del Mundo 2. */
 export class RaycastWorldLockedScene extends Phaser.Scene {
   private gamepadInput!: RaycastGamepadInput;
+  private touchInput!: RaycastTouchInput;
   private statusText!: Phaser.GameObjects.Text;
 
   constructor() {
@@ -29,6 +35,15 @@ export class RaycastWorldLockedScene extends Phaser.Scene {
         lookSensitivity: getGamepadSensitivity(this.registry),
         invertLookY: getGamepadInvertY(this.registry),
         vibrationEnabled: getGamepadVibrationEnabled(this.registry)
+      })
+    });
+    this.touchInput = new RaycastTouchInput(this, {
+      mode: 'ui',
+      getSettings: () => ({
+        enabled: getTouchControlsEnabled(this.registry),
+        buttonScale: getTouchButtonScale(this.registry),
+        lookSensitivity: getTouchLookSensitivity(this.registry),
+        joystickDeadzone: getTouchJoystickDeadzone(this.registry)
       })
     });
     this.cameras.main.setBackgroundColor(RAYCAST_PALETTE.voidBlack);
@@ -76,17 +91,34 @@ export class RaycastWorldLockedScene extends Phaser.Scene {
     kb?.once('keydown-ESC', back);
     kb?.once('keydown-ENTER', back);
 
+    this.touchInput.create();
     this.cameras.main.fadeIn(400, 0, 0, 0);
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.gamepadInput?.destroy(), this);
-    this.events.once(Phaser.Scenes.Events.DESTROY, () => this.gamepadInput?.destroy(), this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.gamepadInput?.destroy();
+      this.touchInput?.destroy();
+    }, this);
+    this.events.once(Phaser.Scenes.Events.DESTROY, () => {
+      this.gamepadInput?.destroy();
+      this.touchInput?.destroy();
+    }, this);
   }
 
   update(): void {
     this.gamepadInput.update();
+    this.touchInput.update();
+    const touchMessage = this.touchInput.consumeStatusMessage();
     this.statusText.setText(
-      `${this.gamepadInput.isConnected() ? 'CONTROL · DETECTADO' : 'CONTROL · SIN CONTROL'}  |  A / START volver al menú  |  B cancelar`
+      touchMessage ??
+        `${this.gamepadInput.isConnected() ? 'CONTROL · DETECTADO' : 'CONTROL · SIN CONTROL'}  |  A / START volver al menú  |  B cancelar`
     );
-    if (this.gamepadInput.consumePressed('confirm') || this.gamepadInput.consumePressed('pause') || this.gamepadInput.consumePressed('cancel')) {
+    if (
+      this.gamepadInput.consumePressed('confirm') ||
+      this.gamepadInput.consumePressed('pause') ||
+      this.gamepadInput.consumePressed('cancel') ||
+      this.touchInput.consumePressed('confirm') ||
+      this.touchInput.consumePressed('pause') ||
+      this.touchInput.consumePressed('cancel')
+    ) {
       this.scene.start('MenuScene');
     }
   }

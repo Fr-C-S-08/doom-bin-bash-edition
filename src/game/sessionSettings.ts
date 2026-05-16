@@ -10,6 +10,10 @@ export const SESSION_GAMEPAD_VIBRATION_KEY = 'session_gamepad_vibration';
 export const SESSION_SCREENSHAKE_KEY = 'session_screenshake';
 export const SESSION_MINIMAP_DEFAULT_KEY = 'session_minimap_default';
 export const SESSION_MASTER_VOLUME_KEY = 'session_master_volume';
+export const SESSION_TOUCH_CONTROLS_KEY = 'session_touch_controls';
+export const SESSION_TOUCH_LOOK_SENS_KEY = 'session_touch_look_sens';
+export const SESSION_TOUCH_BUTTON_SCALE_KEY = 'session_touch_button_scale';
+export const SESSION_TOUCH_JOYSTICK_DEADZONE_KEY = 'session_touch_joystick_deadzone';
 
 export interface SessionRegistry {
   get(key: string): unknown;
@@ -26,6 +30,10 @@ const DEFAULT_GAMEPAD_VIBRATION = false;
 const DEFAULT_SCREENSHAKE = true;
 const DEFAULT_MINIMAP = true;
 const DEFAULT_MASTER_VOL = 0.85;
+const DEFAULT_TOUCH_CONTROLS = true;
+const DEFAULT_TOUCH_LOOK_SENS = 1;
+const DEFAULT_TOUCH_BUTTON_SCALE = 1;
+const DEFAULT_TOUCH_JOYSTICK_DEADZONE = 0.18;
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
@@ -42,6 +50,10 @@ export function ensureSessionSettings(registry: SessionRegistry): void {
   if (registry.get(SESSION_SCREENSHAKE_KEY) === undefined) registry.set(SESSION_SCREENSHAKE_KEY, DEFAULT_SCREENSHAKE);
   if (registry.get(SESSION_MINIMAP_DEFAULT_KEY) === undefined) registry.set(SESSION_MINIMAP_DEFAULT_KEY, DEFAULT_MINIMAP);
   if (registry.get(SESSION_MASTER_VOLUME_KEY) === undefined) registry.set(SESSION_MASTER_VOLUME_KEY, DEFAULT_MASTER_VOL);
+  if (registry.get(SESSION_TOUCH_CONTROLS_KEY) === undefined) registry.set(SESSION_TOUCH_CONTROLS_KEY, DEFAULT_TOUCH_CONTROLS);
+  if (registry.get(SESSION_TOUCH_LOOK_SENS_KEY) === undefined) registry.set(SESSION_TOUCH_LOOK_SENS_KEY, DEFAULT_TOUCH_LOOK_SENS);
+  if (registry.get(SESSION_TOUCH_BUTTON_SCALE_KEY) === undefined) registry.set(SESSION_TOUCH_BUTTON_SCALE_KEY, DEFAULT_TOUCH_BUTTON_SCALE);
+  if (registry.get(SESSION_TOUCH_JOYSTICK_DEADZONE_KEY) === undefined) registry.set(SESSION_TOUCH_JOYSTICK_DEADZONE_KEY, DEFAULT_TOUCH_JOYSTICK_DEADZONE);
 }
 
 export function getMouseSensitivity(registry: SessionRegistry): number {
@@ -141,4 +153,43 @@ export function getSessionMasterVolume(registry: SessionRegistry): number {
 
 export function setSessionMasterVolume(registry: SessionRegistry, linear: number): void {
   registry.set(SESSION_MASTER_VOLUME_KEY, clamp(linear, 0, 1));
+}
+
+export function getTouchControlsEnabled(registry: SessionRegistry): boolean {
+  const v = registry.get(SESSION_TOUCH_CONTROLS_KEY);
+  return v !== false;
+}
+
+export function setTouchControlsEnabled(registry: SessionRegistry, enabled: boolean): void {
+  registry.set(SESSION_TOUCH_CONTROLS_KEY, Boolean(enabled));
+}
+
+export function getTouchLookSensitivity(registry: SessionRegistry): number {
+  const v = Number(registry.get(SESSION_TOUCH_LOOK_SENS_KEY));
+  if (!Number.isFinite(v)) return DEFAULT_TOUCH_LOOK_SENS;
+  return clamp(v, 0.45, 2.2);
+}
+
+export function setTouchLookSensitivity(registry: SessionRegistry, value: number): void {
+  registry.set(SESSION_TOUCH_LOOK_SENS_KEY, clamp(value, 0.45, 2.2));
+}
+
+export function getTouchButtonScale(registry: SessionRegistry): number {
+  const v = Number(registry.get(SESSION_TOUCH_BUTTON_SCALE_KEY));
+  if (!Number.isFinite(v)) return DEFAULT_TOUCH_BUTTON_SCALE;
+  return clamp(v, 0.8, 1.4);
+}
+
+export function setTouchButtonScale(registry: SessionRegistry, value: number): void {
+  registry.set(SESSION_TOUCH_BUTTON_SCALE_KEY, clamp(value, 0.8, 1.4));
+}
+
+export function getTouchJoystickDeadzone(registry: SessionRegistry): number {
+  const v = Number(registry.get(SESSION_TOUCH_JOYSTICK_DEADZONE_KEY));
+  if (!Number.isFinite(v)) return DEFAULT_TOUCH_JOYSTICK_DEADZONE;
+  return clamp(v, 0.05, 0.4);
+}
+
+export function setTouchJoystickDeadzone(registry: SessionRegistry, value: number): void {
+  registry.set(SESSION_TOUCH_JOYSTICK_DEADZONE_KEY, clamp(value, 0.05, 0.4));
 }

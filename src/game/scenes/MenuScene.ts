@@ -15,10 +15,15 @@ import {
   getGamepadLeftDeadzone,
   getGamepadRightDeadzone,
   getGamepadSensitivity,
-  getGamepadVibrationEnabled
+  getGamepadVibrationEnabled,
+  getTouchButtonScale,
+  getTouchControlsEnabled,
+  getTouchJoystickDeadzone,
+  getTouchLookSensitivity
 } from '../sessionSettings';
 import { getRaycastBossLevelId, type RaycastBossShortcutSlot } from '../raycast/RaycastBossShortcuts';
 import { RaycastGamepadInput } from '../systems/RaycastGamepadInput';
+import { RaycastTouchInput } from '../systems/RaycastTouchInput';
 
 const MENU_BACKGROUND = RAYCAST_PALETTE.voidBlack;
 const MENU_CYAN = RAYCAST_PALETTE.plasmaBright;
@@ -33,6 +38,7 @@ export class MenuScene extends Phaser.Scene {
   private difficultyHintText!: Phaser.GameObjects.Text;
   private gamepadStatusText!: Phaser.GameObjects.Text;
   private gamepadInput!: RaycastGamepadInput;
+  private touchInput!: RaycastTouchInput;
   private menuSelectionIndex = 0;
   private startLine!: Phaser.GameObjects.Text;
   private settingsLine!: Phaser.GameObjects.Text;
@@ -124,6 +130,15 @@ export class MenuScene extends Phaser.Scene {
         lookSensitivity: getGamepadSensitivity(this.registry),
         invertLookY: getGamepadInvertY(this.registry),
         vibrationEnabled: getGamepadVibrationEnabled(this.registry)
+      })
+    });
+    this.touchInput = new RaycastTouchInput(this, {
+      mode: 'ui',
+      getSettings: () => ({
+        enabled: getTouchControlsEnabled(this.registry),
+        buttonScale: getTouchButtonScale(this.registry),
+        lookSensitivity: getTouchLookSensitivity(this.registry),
+        joystickDeadzone: getTouchJoystickDeadzone(this.registry)
       })
     });
 
@@ -238,16 +253,37 @@ export class MenuScene extends Phaser.Scene {
     this.cameras.main.fadeIn(520, 0, 0, 0);
 
     this.registerInputListeners();
+    this.touchInput.create();
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.cleanupInputListeners, this);
     this.events.once(Phaser.Scenes.Events.DESTROY, this.cleanupInputListeners, this);
   }
 
   update(): void {
     this.gamepadInput.update();
-    this.gamepadStatusText.setText(this.gamepadInput.isConnected() ? 'CONTROL · DETECTADO' : 'CONTROL · SIN CONTROL');
-    this.gamepadStatusText.setAlpha(this.gamepadInput.isConnected() ? 0.9 : 0.72);
+    this.touchInput.update();
+    const touchMessage = this.touchInput.consumeStatusMessage();
+    if (touchMessage) {
+      this.gamepadStatusText.setText(touchMessage);
+      this.gamepadStatusText.setAlpha(0.92);
+    } else {
+      this.gamepadStatusText.setText(this.gamepadInput.isConnected() ? 'CONTROL · DETECTADO' : 'CONTROL · SIN CONTROL');
+      this.gamepadStatusText.setAlpha(this.gamepadInput.isConnected() ? 0.9 : 0.72);
+    }
 
-    if (this.gamepadInput.consumePressed('navUp') || this.gamepadInput.consumePressed('navDown')) {
+    if (this.touchInput.consumePressed('confirm') || this.touchInput.consumePressed('pause')) {
+      this.handleMenuConfirm();
+    }
+    if (this.touchInput.consumePressed('cancel')) {
+      this.handleMenuCancel();
+    }
+    if (
+      this.gamepadInput.consumePressed('navUp') ||
+      this.gamepadInput.consumePressed('navDown') ||
+      this.touchInput.consumePressed('navUp') ||
+      this.touchInput.consumePressed('navDown') ||
+      this.touchInput.consumePressed('navLeft') ||
+      this.touchInput.consumePressed('navRight')
+    ) {
       this.menuSelectionIndex = (this.menuSelectionIndex + 1) % 2;
       this.refreshMenuSelectionVisuals();
     }
@@ -331,6 +367,7 @@ export class MenuScene extends Phaser.Scene {
     kb?.off('keydown-S', this.handleOpenSettings);
     kb?.off('keydown-s', this.handleOpenSettings);
     this.gamepadInput?.destroy();
+    this.touchInput?.destroy();
     this.inputListenersRegistered = false;
   }
 
