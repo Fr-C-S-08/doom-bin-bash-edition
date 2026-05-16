@@ -27,7 +27,9 @@ describe('raycast pause menu formatting', () => {
     expect(body).toContain('// OBJETIVO');
     expect(body).toContain('│');
     expect(body).toContain('CONTROLES');
-    expect(body).toContain('WASD mover | Mouse mirar | 1/2/3 armas | R recargar | T reiniciar nivel | ESC pausa');
+    expect(body).toContain(
+      'WASD mover | Mouse mirar | Mando: stick izq mover / stick der girar / RT disparar / X recargar / Start pausa'
+    );
     expect(body).toContain('// MENÚ');
     expect(body).toMatch(/Mundo ·/);
     expect(body).not.toContain('PROGRESO');

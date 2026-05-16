@@ -97,7 +97,7 @@ export function formatRaycastPauseMenuMxBody(
     ...pairLines,
     '',
     'CONTROLES',
-    'WASD mover | Mouse mirar | 1/2/3 armas | R recargar | T reiniciar nivel | ESC pausa',
+    'WASD mover | Mouse mirar | Mando: stick izq mover / stick der girar / RT disparar / X recargar / Start pausa',
     '',
     '// MENÚ',
     ...menuLines,

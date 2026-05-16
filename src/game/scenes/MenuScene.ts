@@ -9,8 +9,9 @@ import {
 import { buildMainMenuLayout, getMainMenuCopy } from '../raycast/RaycastPresentation';
 import { RAYCAST_CSS, RAYCAST_PALETTE } from '../raycast/RaycastPalette';
 import { createEmptyCampaignMetrics } from '../raycast/RaycastScore';
-import { ensureSessionSettings } from '../sessionSettings';
+import { ensureSessionSettings, getGamepadDeadzone, getGamepadSensitivity, getGamepadVibrationEnabled } from '../sessionSettings';
 import { getRaycastBossLevelId, type RaycastBossShortcutSlot } from '../raycast/RaycastBossShortcuts';
+import { RaycastGamepadInput } from '../systems/RaycastGamepadInput';
 
 const MENU_BACKGROUND = RAYCAST_PALETTE.voidBlack;
 const MENU_CYAN = RAYCAST_PALETTE.plasmaBright;
@@ -23,6 +24,11 @@ export class MenuScene extends Phaser.Scene {
   private inputListenersRegistered = false;
   private audioFeedback!: AudioFeedbackSystem;
   private difficultyHintText!: Phaser.GameObjects.Text;
+  private gamepadStatusText!: Phaser.GameObjects.Text;
+  private gamepadInput!: RaycastGamepadInput;
+  private menuSelectionIndex = 0;
+  private startLine!: Phaser.GameObjects.Text;
+  private settingsLine!: Phaser.GameObjects.Text;
 
   private readonly handleStartRaycast = (): void => {
     this.playFeedbackEvent('difficultyStart');
@@ -58,6 +64,29 @@ export class MenuScene extends Phaser.Scene {
     this.scene.start('SettingsScene');
   };
 
+  private readonly handleMenuSelectionUp = (): void => {
+    this.menuSelectionIndex = (this.menuSelectionIndex + 1) % 2;
+    this.refreshMenuSelectionVisuals();
+  };
+
+  private readonly handleMenuSelectionDown = (): void => {
+    this.menuSelectionIndex = (this.menuSelectionIndex + 1) % 2;
+    this.refreshMenuSelectionVisuals();
+  };
+
+  private readonly handleMenuConfirm = (): void => {
+    if (this.menuSelectionIndex === 0) {
+      this.handleStartRaycast();
+      return;
+    }
+    this.handleOpenSettings();
+  };
+
+  private readonly handleMenuCancel = (): void => {
+    this.menuSelectionIndex = 0;
+    this.refreshMenuSelectionVisuals();
+  };
+
   private readonly handleCycleDifficulty = (): void => {
     const next = cycleRaycastDifficulty(this.registry.get(RAYCAST_DIFFICULTY_REGISTRY_KEY));
     this.registry.set(RAYCAST_DIFFICULTY_REGISTRY_KEY, next.id);
@@ -81,6 +110,13 @@ export class MenuScene extends Phaser.Scene {
     const copy = getMainMenuCopy();
     const layout = buildMainMenuLayout(width, height);
     this.audioFeedback = new AudioFeedbackSystem();
+    this.gamepadInput = new RaycastGamepadInput({
+      getSettings: () => ({
+        deadzone: getGamepadDeadzone(this.registry),
+        lookSensitivity: getGamepadSensitivity(this.registry),
+        vibrationEnabled: getGamepadVibrationEnabled(this.registry)
+      })
+    });
 
     this.cameras.main.setBackgroundColor(MENU_BACKGROUND);
 
@@ -114,7 +150,7 @@ export class MenuScene extends Phaser.Scene {
       .setDepth(8)
       .setAlpha(0.9);
 
-    const line3d = this.add
+    this.startLine = this.add
       .text(layout.centerX, layout.option3dY, copy.press3d, {
         fontFamily: 'monospace',
         fontSize: '17px',
@@ -127,10 +163,13 @@ export class MenuScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true })
       .on(Phaser.Input.Events.POINTER_DOWN, this.handleStartRaycast);
 
-    line3d.on(Phaser.Input.Events.POINTER_OVER, () => line3d.setColor('#ffffff'));
-    line3d.on(Phaser.Input.Events.POINTER_OUT, () => line3d.setColor(MENU_CYAN_SOFT));
+    this.startLine.on(Phaser.Input.Events.POINTER_OVER, () => {
+      this.menuSelectionIndex = 0;
+      this.refreshMenuSelectionVisuals();
+    });
+    this.startLine.on(Phaser.Input.Events.POINTER_OUT, () => this.refreshMenuSelectionVisuals());
 
-    const settingsLine = this.add
+    this.settingsLine = this.add
       .text(layout.centerX, layout.settingsY, copy.settingsPrompt, {
         fontFamily: 'monospace',
         fontSize: '13px',
@@ -143,16 +182,32 @@ export class MenuScene extends Phaser.Scene {
       .setAlpha(0.92)
       .setInteractive({ useHandCursor: true })
       .on(Phaser.Input.Events.POINTER_DOWN, this.handleOpenSettings);
-    settingsLine.on(Phaser.Input.Events.POINTER_OVER, () => settingsLine.setColor('#ffd0e8'));
-    settingsLine.on(Phaser.Input.Events.POINTER_OUT, () => settingsLine.setColor(MENU_SETTINGS));
+    this.settingsLine.on(Phaser.Input.Events.POINTER_OVER, () => {
+      this.menuSelectionIndex = 1;
+      this.refreshMenuSelectionVisuals();
+    });
+    this.settingsLine.on(Phaser.Input.Events.POINTER_OUT, () => this.refreshMenuSelectionVisuals());
+
+    this.gamepadStatusText = this.add
+      .text(layout.centerX, layout.settingsY + 28, '', {
+        fontFamily: 'monospace',
+        fontSize: '10px',
+        fontStyle: '700',
+        color: '#9ef0cf',
+        align: 'center'
+      })
+      .setOrigin(0.5)
+      .setDepth(8)
+      .setAlpha(0.82);
 
     this.add
-      .text(layout.centerX, layout.footerY, copy.footer, {
+      .text(layout.centerX, layout.footerY, `${copy.footer}  |  A iniciar  |  B volver  |  Start iniciar`, {
         fontFamily: 'monospace',
         fontSize: '10px',
         fontStyle: '700',
         color: '#5c6a7c',
-        align: 'center'
+        align: 'center',
+        wordWrap: { width: width - 48 }
       })
       .setOrigin(0.5, 1)
       .setDepth(8)
@@ -170,11 +225,29 @@ export class MenuScene extends Phaser.Scene {
       .setDepth(8)
       .setAlpha(0.92);
 
+    this.refreshMenuSelectionVisuals();
     this.cameras.main.fadeIn(520, 0, 0, 0);
 
     this.registerInputListeners();
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.cleanupInputListeners, this);
     this.events.once(Phaser.Scenes.Events.DESTROY, this.cleanupInputListeners, this);
+  }
+
+  update(): void {
+    this.gamepadInput.update();
+    this.gamepadStatusText.setText(this.gamepadInput.isConnected() ? 'CONTROL · DETECTADO' : 'CONTROL · SIN CONTROL');
+    this.gamepadStatusText.setAlpha(this.gamepadInput.isConnected() ? 0.9 : 0.72);
+
+    if (this.gamepadInput.consumePressed('navUp') || this.gamepadInput.consumePressed('navDown')) {
+      this.menuSelectionIndex = (this.menuSelectionIndex + 1) % 2;
+      this.refreshMenuSelectionVisuals();
+    }
+    if (this.gamepadInput.consumePressed('confirm') || this.gamepadInput.consumePressed('pause')) {
+      this.handleMenuConfirm();
+    }
+    if (this.gamepadInput.consumePressed('cancel')) {
+      this.handleMenuCancel();
+    }
   }
 
   private drawBackdrop(width: number, height: number): void {
@@ -248,7 +321,13 @@ export class MenuScene extends Phaser.Scene {
     kb?.off('keydown-SIX', this.handleBossMenuThree);
     kb?.off('keydown-S', this.handleOpenSettings);
     kb?.off('keydown-s', this.handleOpenSettings);
+    this.gamepadInput?.destroy();
     this.inputListenersRegistered = false;
+  }
+
+  private refreshMenuSelectionVisuals(): void {
+    this.startLine?.setColor(this.menuSelectionIndex === 0 ? '#ffffff' : MENU_CYAN_SOFT);
+    this.settingsLine?.setColor(this.menuSelectionIndex === 1 ? '#ffd0e8' : MENU_SETTINGS);
   }
 
   private playFeedbackEvent(event: 'difficultySelect' | 'difficultyStart'): void {

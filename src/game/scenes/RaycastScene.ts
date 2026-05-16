@@ -212,9 +212,13 @@ import {
 } from '../raycast/RaycastPauseMenu';
 import { getBillboardColor } from '../raycast/RaycastVisualTheme';
 import { getRaycastBossLevelId, resolveRaycastBossShortcutLevelId, type RaycastBossShortcutSlot } from '../raycast/RaycastBossShortcuts';
+import { RaycastGamepadInput } from '../systems/RaycastGamepadInput';
 import { palette } from '../theme/palette';
 import {
   ensureSessionSettings,
+  getGamepadDeadzone,
+  getGamepadSensitivity,
+  getGamepadVibrationEnabled,
   getMinimapDefaultVisible,
   getMouseSensitivity,
   getScreenshakeEnabled,
@@ -259,6 +263,7 @@ const PAUSE_BODY_WRAP = PAUSE_PANEL_WIDTH - 36;
 export class RaycastScene extends Phaser.Scene {
   private raycastRenderer!: RaycastRenderer;
   private controller!: RaycastPlayerController;
+  private gamepadInput!: RaycastGamepadInput;
   private combat!: RaycastCombatSystem;
   private audioFeedback!: AudioFeedbackSystem;
   private gameDirector!: GameDirector;
@@ -666,13 +671,21 @@ export class RaycastScene extends Phaser.Scene {
     this.keySystem = new KeySystem();
     this.doorSystem = new DoorSystem(this.keySystem);
     this.triggerSystem = new TriggerSystem();
+    this.gamepadInput = new RaycastGamepadInput({
+      getSettings: () => ({
+        deadzone: getGamepadDeadzone(this.registry),
+        lookSensitivity: getGamepadSensitivity(this.registry),
+        vibrationEnabled: getGamepadVibrationEnabled(this.registry)
+      })
+    });
     this.raycastRenderer = new RaycastRenderer(this, this.map, this.currentLevel);
     this.controller = new RaycastPlayerController(
       this,
       this.map,
       this.player,
       RAYCAST_MOVEMENT,
-      () => getMouseSensitivity(this.registry)
+      () => getMouseSensitivity(this.registry),
+      this.gamepadInput
     );
     this.controller.create();
     this.controller.setMoveSpeedMultiplier(
@@ -1097,6 +1110,7 @@ export class RaycastScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
+    this.pollGamepadInput();
     this.combat?.tick(this.time.now);
     if (this.playerAlive && !this.levelComplete && !this.gamePaused) {
       this.controller.update(delta);
@@ -1178,6 +1192,59 @@ export class RaycastScene extends Phaser.Scene {
           message: this.getCurrentStatusMessage()
         })
       );
+    }
+  }
+
+  private pollGamepadInput(): void {
+    if (!this.gamepadInput) return;
+    this.gamepadInput.update();
+    const message = this.gamepadInput.consumeStatusMessage();
+    if (message) this.setCombatMessage(message, 1600);
+
+    if (this.gamepadInput.consumePressed('toggleMap')) {
+      this.handleToggleMinimap();
+    }
+
+    if (this.gamepadInput.consumePressed('pause')) {
+      this.handleEscKey();
+    }
+
+    if (this.gamepadInput.consumePressed('cancel')) {
+      if (this.gamePaused) this.closePauseMenu();
+      else this.handleEscKey();
+    }
+
+    if (this.gamepadInput.consumePressed('confirm')) {
+      if (this.gamePaused) {
+        this.handlePauseMenuConfirm();
+      } else if (this.levelComplete) {
+        if (!this.episodeComplete && this.nextLevelId !== null) this.handleAdvanceLevel();
+        else this.restartCurrentLevel();
+      }
+    }
+
+    if (this.gamepadInput.consumePressed('reload')) {
+      this.handleRetry();
+    }
+
+    if (this.gamepadInput.consumePressed('fire')) {
+      this.handleFireInput();
+    }
+
+    if (this.gamepadInput.consumePressed('nextWeapon')) {
+      this.cycleWeapon(1);
+    }
+
+    if (this.gamepadInput.consumePressed('previousWeapon')) {
+      this.cycleWeapon(-1);
+    }
+
+    if (this.gamepadInput.consumePressed('navUp')) {
+      this.handlePauseMenuUp();
+    }
+
+    if (this.gamepadInput.consumePressed('navDown')) {
+      this.handlePauseMenuDown();
     }
   }
 
@@ -1320,6 +1387,7 @@ export class RaycastScene extends Phaser.Scene {
   private cleanupSceneLifecycle(): void {
     if (!this.sceneReady && !this.inputListenersRegistered) return;
     this.sceneReady = false;
+    this.gamepadInput?.destroy();
     this.controller?.destroy();
     this.cleanupInputListeners();
     this.killUiTweens();
@@ -1480,6 +1548,7 @@ export class RaycastScene extends Phaser.Scene {
     const firePitchMul = Phaser.Math.FloatBetween(0.97, 1.04);
     this.audioFeedback.play(weaponAudio.cue, weaponAudio.intensity, this.time.now, { pitchMul: firePitchMul });
     this.applyCombatShake(FIRE_SHAKE_DURATION_MS, Math.min(FIRE_SHAKE_INTENSITY_CAP, FIRE_SHAKE_INTENSITY));
+    if (result.weaponKind === 'SHOTGUN') this.gamepadInput?.vibrate('light');
 
     const liveBosses = this.getLiveBosses();
     if (liveBosses.length > 0) {
@@ -1519,6 +1588,7 @@ export class RaycastScene extends Phaser.Scene {
           this.pulseFeedback(0xffc36b, 0.16, 260);
           this.cameras.main.flash(160, 255, 214, 120);
           this.applyCombatShake(210, 0.003);
+          this.gamepadInput?.vibrate('boss');
         }
         const impactPitch = Phaser.Math.FloatBetween(0.97, 1.03);
         if (killed) {
@@ -1702,6 +1772,15 @@ export class RaycastScene extends Phaser.Scene {
     if (!this.playerAlive || this.levelComplete) return;
     this.combat.switchWeaponSlot(slot);
     this.setCombatMessage(`WEAPON ROUTED: ${this.combat.getWeaponLabel()}`);
+  }
+
+  private cycleWeapon(direction: number): void {
+    if (!this.canHandleRaycastInput()) return;
+    if (!this.playerAlive || this.levelComplete) return;
+    const current = this.combat.getCurrentWeapon();
+    const nextSlot =
+      current === 'PISTOL' ? (direction > 0 ? 2 : 3) : current === 'SHOTGUN' ? (direction > 0 ? 3 : 1) : direction > 0 ? 1 : 2;
+    this.switchWeapon(nextSlot);
   }
 
   private countLivingEnemies(): number {
@@ -2050,6 +2129,7 @@ export class RaycastScene extends Phaser.Scene {
     const shakeMag = Phaser.Math.Clamp(0.00275 + appliedDamage * 0.000065, 0.00275, 0.0045);
     this.cameras.main.shake(shakeDur, shakeMag);
     this.flashDamage(appliedDamage);
+    this.gamepadInput?.vibrate('damage');
     let damageIntensity = Phaser.Math.Clamp(0.58 + appliedDamage * 0.019, 0.58, 1.05);
     if (this.getLiveBosses().length > 0) damageIntensity = Math.min(1.08, damageIntensity + 0.065);
     if (this.playerHealth > 0) {

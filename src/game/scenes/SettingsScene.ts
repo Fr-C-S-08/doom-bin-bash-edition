@@ -3,28 +3,36 @@ import { AudioFeedbackSystem } from '../systems/AudioFeedbackSystem';
 import { RAYCAST_CSS, RAYCAST_PALETTE } from '../raycast/RaycastPalette';
 import {
   ensureSessionSettings,
+  getGamepadDeadzone,
+  getGamepadSensitivity,
+  getGamepadVibrationEnabled,
   getMinimapDefaultVisible,
   getMouseSensitivity,
   getScreenshakeEnabled,
   getSessionMasterVolume,
+  setGamepadDeadzone,
+  setGamepadSensitivity,
+  setGamepadVibrationEnabled,
   setMinimapDefaultVisible,
   setMouseSensitivity,
   setScreenshakeEnabled,
   setSessionMasterVolume
 } from '../sessionSettings';
+import { RaycastGamepadInput } from '../systems/RaycastGamepadInput';
 
 const BG = RAYCAST_PALETTE.voidBlack;
 const ACCENT = RAYCAST_CSS.accentText;
 const BODY = RAYCAST_CSS.bodyText;
 const MUTED = RAYCAST_CSS.mutedText;
 
-const ROW_KEYS = ['mouse', 'vol', 'shake', 'minimap', 'fullscreen', 'back'] as const;
+const ROW_KEYS = ['control', 'mouse', 'pad_sens', 'pad_deadzone', 'pad_vibe', 'vol', 'shake', 'minimap', 'fullscreen', 'back'] as const;
 type SettingRow = (typeof ROW_KEYS)[number];
 
 export class SettingsScene extends Phaser.Scene {
   private bodyText!: Phaser.GameObjects.Text;
   private audioPreview!: AudioFeedbackSystem;
-  private rowIndex = 0;
+  private gamepadInput!: RaycastGamepadInput;
+  private rowIndex = 1;
 
   private readonly handleBack = (): void => {
     this.scene.start('MenuScene');
@@ -32,11 +40,13 @@ export class SettingsScene extends Phaser.Scene {
 
   private readonly handleUp = (): void => {
     this.rowIndex = (this.rowIndex + ROW_KEYS.length - 1) % ROW_KEYS.length;
+    if (ROW_KEYS[this.rowIndex] === 'control') this.rowIndex = (this.rowIndex + ROW_KEYS.length - 1) % ROW_KEYS.length;
     this.refreshBody();
   };
 
   private readonly handleDown = (): void => {
     this.rowIndex = (this.rowIndex + 1) % ROW_KEYS.length;
+    if (ROW_KEYS[this.rowIndex] === 'control') this.rowIndex = (this.rowIndex + 1) % ROW_KEYS.length;
     this.refreshBody();
   };
 
@@ -74,6 +84,13 @@ export class SettingsScene extends Phaser.Scene {
     const height = this.scale.height;
     this.audioPreview = new AudioFeedbackSystem();
     this.audioPreview.setMasterVolume(getSessionMasterVolume(this.registry));
+    this.gamepadInput = new RaycastGamepadInput({
+      getSettings: () => ({
+        deadzone: getGamepadDeadzone(this.registry),
+        lookSensitivity: getGamepadSensitivity(this.registry),
+        vibrationEnabled: getGamepadVibrationEnabled(this.registry)
+      })
+    });
 
     this.cameras.main.setBackgroundColor(BG);
     const backdrop = this.add.graphics().setDepth(0);
@@ -119,7 +136,8 @@ export class SettingsScene extends Phaser.Scene {
       .setOrigin(0.5, 1)
       .setDepth(3)
       .setAlpha(0.75)
-      .setText('↑ / ↓ · fila   ← / → · ajustar   ENTER · pantalla comp. / volver   ESC · menú');
+      .setText('↑ / ↓ · fila   ← / → · ajustar   A / ENTER · confirmar   B / Start / ESC · volver')
+      .setWordWrapWidth(width - 48, true);
 
     this.refreshBody();
     this.cameras.main.fadeIn(420, 0, 0, 0);
@@ -136,6 +154,23 @@ export class SettingsScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.DESTROY, this.cleanup, this);
   }
 
+  update(): void {
+    this.gamepadInput.update();
+    if (this.gamepadInput.consumePressed('cancel') || this.gamepadInput.consumePressed('pause')) {
+      this.handleBack();
+      return;
+    }
+    if (this.gamepadInput.consumePressed('confirm')) {
+      this.handleEnter();
+      return;
+    }
+    if (this.gamepadInput.consumePressed('navUp')) this.handleUp();
+    if (this.gamepadInput.consumePressed('navDown')) this.handleDown();
+    if (this.gamepadInput.consumePressed('navLeft') || this.gamepadInput.consumePressed('previousWeapon')) this.handleLeft();
+    if (this.gamepadInput.consumePressed('navRight') || this.gamepadInput.consumePressed('nextWeapon')) this.handleRight();
+    this.refreshBody();
+  }
+
   private cleanup(): void {
     const kb = this.input.keyboard;
     kb?.off('keydown-ESC', this.handleBack);
@@ -144,6 +179,7 @@ export class SettingsScene extends Phaser.Scene {
     kb?.off('keydown-LEFT', this.handleLeft);
     kb?.off('keydown-RIGHT', this.handleRight);
     kb?.off('keydown-ENTER', this.handleEnter);
+    this.gamepadInput?.destroy();
   }
 
   private adjustActive(direction: number): void {
@@ -152,6 +188,17 @@ export class SettingsScene extends Phaser.Scene {
       const next = Math.round((getMouseSensitivity(this.registry) + direction * 0.05) * 100) / 100;
       setMouseSensitivity(this.registry, next);
       this.audioPreview.play('uiSoftDeny', 0.55, this.time.now);
+    } else if (row === 'pad_sens') {
+      const next = Math.round((getGamepadSensitivity(this.registry) + direction * 0.05) * 100) / 100;
+      setGamepadSensitivity(this.registry, next);
+      this.audioPreview.play('uiConfirm', 0.62, this.time.now);
+    } else if (row === 'pad_deadzone') {
+      const next = Math.round((getGamepadDeadzone(this.registry) + direction * 0.01) * 100) / 100;
+      setGamepadDeadzone(this.registry, next);
+      this.audioPreview.play('uiConfirm', 0.62, this.time.now);
+    } else if (row === 'pad_vibe') {
+      setGamepadVibrationEnabled(this.registry, direction > 0);
+      this.audioPreview.play('difficultySelect', 0.75, this.time.now);
     } else if (row === 'vol') {
       const next = Math.round((getSessionMasterVolume(this.registry) + direction * 0.05) * 100) / 100;
       setSessionMasterVolume(this.registry, next);
@@ -171,6 +218,10 @@ export class SettingsScene extends Phaser.Scene {
 
   private refreshBody(): void {
     const sens = getMouseSensitivity(this.registry).toFixed(2);
+    const padSens = getGamepadSensitivity(this.registry).toFixed(2);
+    const padDeadzone = getGamepadDeadzone(this.registry).toFixed(2);
+    const padVibe = getGamepadVibrationEnabled(this.registry) ? 'SÍ' : 'NO';
+    const controlStatus = this.gamepadInput.isConnected() ? 'DETECTADO' : 'SIN CONTROL';
     const vol = Math.round(getSessionMasterVolume(this.registry) * 100);
     const shake = getScreenshakeEnabled(this.registry) ? 'SÍ' : 'NO';
     const mini = getMinimapDefaultVisible(this.registry) ? 'SÍ' : 'NO';
@@ -181,7 +232,11 @@ export class SettingsScene extends Phaser.Scene {
       const mark = i === this.rowIndex ? '>' : ' ';
       rows.push(`${mark} ${line}`);
     };
+    label('control', `CONTROL · ${controlStatus}`);
     label('mouse', `RATÓN · sensibilidad ×${sens}`);
+    label('pad_sens', `MANDO · sensibilidad ×${padSens}`);
+    label('pad_deadzone', `MANDO · deadzone ${padDeadzone}`);
+    label('pad_vibe', `MANDO · vibración ${padVibe}`);
     label('vol', `AUDIO · volumen maestro ${vol}%`);
     label('shake', `PANTALLA · screenshake ${shake}`);
     label('minimap', `MINIMAPA · visible al iniciar ${mini}`);

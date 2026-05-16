@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import type { RaycastMap } from './RaycastMap';
+import type { RaycastGamepadInput } from '../systems/RaycastGamepadInput';
 import {
   applyRaycastMouseTurn,
   getCameraRelativeInput,
@@ -28,7 +29,8 @@ export class RaycastPlayerController {
     private readonly map: RaycastMap,
     private readonly state: RaycastPlayerState,
     private readonly config: RaycastMovementConfig = RAYCAST_MOVEMENT,
-    private readonly getMouseSensitivityMul?: () => number
+    private readonly getMouseSensitivityMul?: () => number,
+    private readonly gamepadInput?: RaycastGamepadInput
   ) {}
 
   create(): void {
@@ -49,12 +51,16 @@ export class RaycastPlayerController {
             strafeSpeed: this.config.strafeSpeed * this.moveSpeedMultiplier
           };
     const deltaSeconds = deltaMs / 1000;
+    const gamepadMove = this.gamepadInput?.getMoveInput() ?? { x: 0, y: 0 };
+    const gamepadLook = this.gamepadInput?.getLookInput() ?? { x: 0, y: 0 };
     const turnInput =
-      Number(this.cursors.right.isDown || this.keys.E.isDown) - Number(this.cursors.left.isDown || this.keys.Q.isDown);
-    this.state.angle += turnInput * moveConfig.turnSpeed * deltaSeconds;
+      Number(this.cursors.right.isDown || this.keys.E.isDown) -
+      Number(this.cursors.left.isDown || this.keys.Q.isDown) +
+      gamepadLook.x;
+    this.state.angle += Phaser.Math.Clamp(turnInput, -1, 1) * moveConfig.turnSpeed * deltaSeconds;
 
-    const forwardInput = Number(this.keys.W.isDown) - Number(this.keys.S.isDown);
-    const strafeInput = Number(this.keys.D.isDown) - Number(this.keys.A.isDown);
+    const forwardInput = Number(this.keys.W.isDown) - Number(this.keys.S.isDown) + gamepadMove.y;
+    const strafeInput = Number(this.keys.D.isDown) - Number(this.keys.A.isDown) + gamepadMove.x;
     const movementInput = getCameraRelativeInput(forwardInput, strafeInput, this.state.angle, moveConfig);
     this.state.velocity = updateRaycastVelocity(this.state.velocity, movementInput, deltaMs, moveConfig);
     const movedState = moveWithWallSlide(this.map, this.state, deltaMs, moveConfig);
