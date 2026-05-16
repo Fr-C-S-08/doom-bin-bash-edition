@@ -77,6 +77,20 @@ doom-bin-bash-edition/
 └── ...
 ```
 
+> **Notas de implementación (realidad del código):**
+>
+> - La lógica FSM de enemigos vive en `src/game/raycast/RaycastEnemySystem.ts`
+>   (`updateRaycastEnemies()`), no en un archivo `EnemyFSM.ts` separado.
+> - No existe `TargetSelector.ts` en el modo raycast; la selección de objetivo
+>   está integrada en `RaycastCombatSystem.ts` (`findEnemyAlongAim()`).
+> - El "estado" de un enemigo no es un enum explícito. Se deriva de flags:
+>   `alive`, `spawnTelegraphUntil`, `attackWindupUntil`, `staggerUntil`.
+>   Al serializar al snapshot, el servidor mapeará esos flags al campo
+>   `EnemyState.state` del protocolo.
+> - Existen **6 arquetipos** de enemigos en el código (no 4): `GRUNT`, `BRUTE`,
+>   `STALKER`, `RANGED`, `SCRAMBLER`, `FLASHER`. `EnemyState.archetype` los
+>   incluye todos.
+
 ### 4.2 Modelo de autoridad
 
 **Servidor autoritativo light**:
@@ -259,6 +273,13 @@ Pantalla de conexión. Llaves, puertas, items sincronizados. Game over. Pruebas 
 - Single-player original sigue funcionando.
 - `npm run test`, `npm run lint`, `npm run build` siguen pasando en cliente.
 - El servidor tiene sus propios tests para lógica crítica.
+
+## 10. TODOs para fases futuras
+
+- **Fase 3:** Refactorizar `GameDirectorInput` de campos `p1Health`/`p2Health`/
+  `p1Alive`/`p2Alive` a `players: PlayerSlot[]` para soportar 3 jugadores.
+  Actualizar los tests de `game-director.test.ts`. Es prerequisito para correr
+  el director en el servidor.
 
 ## 8. Fuera de alcance
 

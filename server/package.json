@@ -1,0 +1,23 @@
+{
+  "name": "doom-bin-bash-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/src/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "nanoid": "^5.1.5",
+    "ws": "^8.18.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/ws": "^8.5.14",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "vitest": "^2.1.9"
+  }
+}
