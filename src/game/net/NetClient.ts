@@ -5,6 +5,7 @@ type MessageHandler<T> = (msg: T) => void;
 export class NetClient {
   private ws: WebSocket | null = null;
   private readonly listeners = new Map<string, Set<MessageHandler<unknown>>>();
+  private inputSeq = 0;
   playerId: string | null = null;
 
   connect(url: string): Promise<void> {
@@ -48,6 +49,11 @@ export class NetClient {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg));
     }
+  }
+
+  sendInput(x: number, y: number, yaw: number, keys: string[]): void {
+    this.inputSeq += 1;
+    this.send({ type: 'input', seq: this.inputSeq, x, y, yaw, keys });
   }
 
   on<T>(type: string, handler: MessageHandler<T>): void {
