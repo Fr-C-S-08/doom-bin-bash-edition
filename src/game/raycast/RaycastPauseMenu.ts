@@ -1,3 +1,5 @@
+import { formatRaycastActiveInputLine, formatRaycastControlsHelpBlock, type RaycastActiveInputKind } from './RaycastInputHelp';
+
 /** Pause menu labels shared by RaycastScene — keeps the gameplay scene slimmer. */
 
 export const RAYCAST_PAUSE_MENU_LABELS = [
@@ -41,6 +43,7 @@ export function truncatePauseField(text: string, maxChars: number): string {
 }
 
 export interface RaycastPauseMenuMxModel {
+  activeInput: RaycastActiveInputKind;
   volumePct: number;
   selectionIndex: number;
   worldLine: string;
@@ -60,6 +63,7 @@ export const RAYCAST_CONTROL_PAUSE_ROWS = ['control', 'mouse', 'pad_sens', 'left
 export type RaycastControlPauseRow = (typeof RAYCAST_CONTROL_PAUSE_ROWS)[number];
 
 export interface RaycastControlPauseModel {
+  activeInput: RaycastActiveInputKind;
   controlStatus: string;
   selectionIndex: number;
   mouseSensitivity: string;
@@ -116,8 +120,9 @@ export function formatRaycastPauseMenuMxBody(
     '',
     ...pairLines,
     '',
+    formatRaycastActiveInputLine(model.activeInput),
     'CONTROLES',
-    'WASD mover | Mouse mirar | Mando: stick izq mover / stick der girar / RT disparar / X recargar / Start pausa',
+    formatRaycastControlsHelpBlock(model.activeInput),
     '',
     '// MENÚ',
     ...menuLines,
@@ -148,6 +153,10 @@ export function formatRaycastControlPauseBody(model: RaycastControlPauseModel, o
   });
   return [
     'CONFIGURACIÓN DE CONTROL',
+    formatRaycastActiveInputLine(model.activeInput),
+    '',
+    'CONTROLES',
+    formatRaycastControlsHelpBlock(model.activeInput),
     '',
     ...formatted,
     '',

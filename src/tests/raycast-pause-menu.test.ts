@@ -9,6 +9,7 @@ import {
 describe('raycast pause menu formatting', () => {
   it('lays out two columns, single-line controls, and menu cursor', () => {
     const body = formatRaycastPauseMenuMxBody({
+      activeInput: 'keyboard_mouse',
       volumePct: 80,
       selectionIndex: 2,
       worldLine: 'EP 1 · Sector demo',
@@ -28,9 +29,8 @@ describe('raycast pause menu formatting', () => {
     expect(body).toContain('// OBJETIVO');
     expect(body).toContain('│');
     expect(body).toContain('CONTROLES');
-    expect(body).toContain(
-      'WASD mover | Mouse mirar | Mando: stick izq mover / stick der girar / RT disparar / X recargar / Start pausa'
-    );
+    expect(body).toContain('Entrada activa: teclado/mouse');
+    expect(body).toContain('WASD · mover');
     expect(body).toContain('Configuración de control');
     expect(body).toContain('// MENÚ');
     expect(body).toMatch(/Mundo ·/);
@@ -47,6 +47,7 @@ describe('raycast pause menu formatting', () => {
 
   it('renders the pause control panel compactly and clearly', () => {
     const body = formatRaycastControlPauseBody({
+      activeInput: 'gamepad',
       controlStatus: 'DETECTADO',
       selectionIndex: 2,
       mouseSensitivity: 'x1.00',
@@ -60,6 +61,8 @@ describe('raycast pause menu formatting', () => {
     });
 
     expect(body).toContain('CONFIGURACIÓN DE CONTROL');
+    expect(body).toContain('Entrada activa: control');
+    expect(body).toContain('Stick izq · mover');
     expect(body).toContain('CONTROL · DETECTADO');
     expect(body).toContain('RATÓN · sensibilidad x1.00');
     expect(body).toContain('MANDO · deadzone izq 0.18');

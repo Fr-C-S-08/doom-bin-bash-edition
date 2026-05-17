@@ -4,6 +4,13 @@ import { RAYCAST_CSS, RAYCAST_PALETTE } from '../raycast/RaycastPalette';
 import { prepareGameSession, setPreferFullscreenSaved } from '../save/persistSessionSettings';
 import { formatAimAssistLabel } from '../raycast/RaycastLookFeel';
 import {
+  formatRaycastActiveInputLine,
+  formatRaycastControlsHelpBlock,
+  resolveRaycastActiveInput,
+  type RaycastActiveInputKind,
+  type RaycastActiveInputSnapshot
+} from '../raycast/RaycastInputHelp';
+import {
   cycleAimAssistSetting,
   getAimAssistLevel,
   getCameraSmoothing,
@@ -71,28 +78,63 @@ export class SettingsScene extends Phaser.Scene {
   private gamepadInput!: RaycastGamepadInput;
   private touchInput!: RaycastTouchInput;
   private rowIndex = 1;
+  private detectedActiveInputKind: RaycastActiveInputKind = 'keyboard_mouse';
 
   private readonly handleBack = (): void => {
     this.scene.start('MenuScene');
   };
 
+  private getActiveInputSnapshot(): RaycastActiveInputSnapshot {
+    return {
+      gamepadConnected: this.gamepadInput.isConnected(),
+      touchActive: this.touchInput.isActive(),
+      touchControlsEnabled: getTouchControlsEnabled(this.registry)
+    };
+  }
+
+  private resolveSettingsActiveInput(): RaycastActiveInputKind {
+    return resolveRaycastActiveInput(this.getActiveInputSnapshot(), this.detectedActiveInputKind);
+  }
+
+  private markDetectedActiveInput(kind: RaycastActiveInputKind): void {
+    this.detectedActiveInputKind = kind;
+  }
+
+  private trackSettingsInputActivity(): void {
+    if (this.touchInput.isActive()) {
+      this.markDetectedActiveInput('touch');
+      return;
+    }
+    if (this.gamepadInput.isConnected()) {
+      const move = this.gamepadInput.getMoveInput();
+      const look = this.gamepadInput.getLookInput();
+      if (Math.hypot(move.x, move.y, look.x, look.y) > 0.14) {
+        this.markDetectedActiveInput('gamepad');
+      }
+    }
+  }
+
   private readonly handleUp = (): void => {
+    this.markDetectedActiveInput('keyboard_mouse');
     this.rowIndex = (this.rowIndex + ROW_KEYS.length - 1) % ROW_KEYS.length;
     if (ROW_KEYS[this.rowIndex] === 'control') this.rowIndex = (this.rowIndex + ROW_KEYS.length - 1) % ROW_KEYS.length;
     this.refreshBody();
   };
 
   private readonly handleDown = (): void => {
+    this.markDetectedActiveInput('keyboard_mouse');
     this.rowIndex = (this.rowIndex + 1) % ROW_KEYS.length;
     if (ROW_KEYS[this.rowIndex] === 'control') this.rowIndex = (this.rowIndex + 1) % ROW_KEYS.length;
     this.refreshBody();
   };
 
   private readonly handleLeft = (): void => {
+    this.markDetectedActiveInput('keyboard_mouse');
     this.adjustActive(-1);
   };
 
   private readonly handleRight = (): void => {
+    this.markDetectedActiveInput('keyboard_mouse');
     this.adjustActive(1);
   };
 
@@ -209,6 +251,27 @@ export class SettingsScene extends Phaser.Scene {
   update(): void {
     this.gamepadInput.update();
     this.touchInput.update();
+    this.trackSettingsInputActivity();
+    if (
+      this.gamepadInput.consumePressed('navUp') ||
+      this.gamepadInput.consumePressed('navDown') ||
+      this.gamepadInput.consumePressed('navLeft') ||
+      this.gamepadInput.consumePressed('navRight') ||
+      this.gamepadInput.consumePressed('confirm') ||
+      this.gamepadInput.consumePressed('cancel')
+    ) {
+      this.markDetectedActiveInput('gamepad');
+    }
+    if (
+      this.touchInput.consumePressed('navUp') ||
+      this.touchInput.consumePressed('navDown') ||
+      this.touchInput.consumePressed('navLeft') ||
+      this.touchInput.consumePressed('navRight') ||
+      this.touchInput.consumePressed('confirm') ||
+      this.touchInput.consumePressed('cancel')
+    ) {
+      this.markDetectedActiveInput('touch');
+    }
     if (this.gamepadInput.consumePressed('cancel') || this.gamepadInput.consumePressed('pause')) {
       this.handleBack();
       return;
@@ -354,6 +417,17 @@ export class SettingsScene extends Phaser.Scene {
     label('fullscreen', `PANTALLA COMPLETA · ${fs}`);
     label('back', 'VOLVER AL MENÚ ← ENTER / ESC');
 
-    this.bodyText.setText(['Ajustes guardados en este dispositivo.', '', ...rows].join('\n'));
+    const activeInput = this.resolveSettingsActiveInput();
+    this.bodyText.setText(
+      [
+        'Ajustes guardados en este dispositivo.',
+        formatRaycastActiveInputLine(activeInput),
+        '',
+        'CONTROLES',
+        formatRaycastControlsHelpBlock(activeInput),
+        '',
+        ...rows
+      ].join('\n')
+    );
   }
 }

@@ -226,6 +226,11 @@ import {
   RAYCAST_CONTROL_PAUSE_ROWS,
   RAYCAST_PAUSE_MENU_LABELS
 } from '../raycast/RaycastPauseMenu';
+import {
+  resolveRaycastActiveInput,
+  type RaycastActiveInputKind,
+  type RaycastActiveInputSnapshot
+} from '../raycast/RaycastInputHelp';
 import { getBillboardColor } from '../raycast/RaycastVisualTheme';
 import { getRaycastBossLevelId, resolveRaycastBossShortcutLevelId, type RaycastBossShortcutSlot } from '../raycast/RaycastBossShortcuts';
 import { RaycastGamepadInput } from '../systems/RaycastGamepadInput';
@@ -358,6 +363,7 @@ export class RaycastScene extends Phaser.Scene {
   private pauseSelectionIndex = 0;
   private pauseControlSelectionIndex = 1;
   private pausePanelMode: 'main' | 'control' = 'main';
+  private detectedActiveInputKind: RaycastActiveInputKind = 'keyboard_mouse';
   private passiveRegenHudActive = false;
   private passiveRegenHudLabel: string | null = null;
   private passiveHealFractionalCarry = 0;
@@ -634,7 +640,40 @@ export class RaycastScene extends Phaser.Scene {
     this.handleExitToMenu();
   };
 
+  private getActiveInputSnapshot(): RaycastActiveInputSnapshot {
+    return {
+      gamepadConnected: this.gamepadInput?.isConnected() ?? false,
+      touchActive: this.touchInput?.isActive() ?? false,
+      touchControlsEnabled: getTouchControlsEnabled(this.registry)
+    };
+  }
+
+  private resolveSceneActiveInput(): RaycastActiveInputKind {
+    return resolveRaycastActiveInput(this.getActiveInputSnapshot(), this.detectedActiveInputKind);
+  }
+
+  private markDetectedActiveInput(kind: RaycastActiveInputKind): void {
+    if (this.detectedActiveInputKind === kind) return;
+    this.detectedActiveInputKind = kind;
+    if (this.gamePaused) this.refreshPauseMenuBody();
+  }
+
+  private trackConnectedInputActivity(): void {
+    if (this.touchInput?.isActive()) {
+      this.markDetectedActiveInput('touch');
+      return;
+    }
+    if (this.gamepadInput?.isConnected()) {
+      const move = this.gamepadInput.getMoveInput();
+      const look = this.gamepadInput.getLookInput();
+      if (Math.hypot(move.x, move.y, look.x, look.y) > 0.14) {
+        this.markDetectedActiveInput('gamepad');
+      }
+    }
+  }
+
   private readonly handlePauseMenuUp = (): void => {
+    this.markDetectedActiveInput('keyboard_mouse');
     if (!this.gamePaused) return;
     if (this.pausePanelMode === 'control') {
       this.pauseControlSelectionIndex = this.getWrappedControlSelectionIndex(-1);
@@ -646,6 +685,7 @@ export class RaycastScene extends Phaser.Scene {
   };
 
   private readonly handlePauseMenuDown = (): void => {
+    this.markDetectedActiveInput('keyboard_mouse');
     if (!this.gamePaused) return;
     if (this.pausePanelMode === 'control') {
       this.pauseControlSelectionIndex = this.getWrappedControlSelectionIndex(1);
@@ -656,11 +696,13 @@ export class RaycastScene extends Phaser.Scene {
   };
 
   private readonly handlePauseMenuLeft = (): void => {
+    this.markDetectedActiveInput('keyboard_mouse');
     if (!this.gamePaused || this.pausePanelMode !== 'control') return;
     this.adjustControlSetting(-1);
   };
 
   private readonly handlePauseMenuRight = (): void => {
+    this.markDetectedActiveInput('keyboard_mouse');
     if (!this.gamePaused || this.pausePanelMode !== 'control') return;
     this.adjustControlSetting(1);
   };
@@ -1321,6 +1363,13 @@ export class RaycastScene extends Phaser.Scene {
         })
       );
     }
+    if (this.gamePaused) {
+      const resolved = this.resolveSceneActiveInput();
+      if (resolved !== this.detectedActiveInputKind) {
+        this.detectedActiveInputKind = resolved;
+        this.refreshPauseMenuBody();
+      }
+    }
   }
 
   private pollGamepadInput(): void {
@@ -1390,6 +1439,19 @@ export class RaycastScene extends Phaser.Scene {
     if (this.gamepadInput.consumePressed('navRight')) {
       this.handlePauseMenuRight();
     }
+
+    if (
+      this.gamepadInput.consumePressed('navUp') ||
+      this.gamepadInput.consumePressed('navDown') ||
+      this.gamepadInput.consumePressed('navLeft') ||
+      this.gamepadInput.consumePressed('navRight') ||
+      this.gamepadInput.consumePressed('confirm') ||
+      this.gamepadInput.consumePressed('cancel') ||
+      this.gamepadInput.consumePressed('pause')
+    ) {
+      this.markDetectedActiveInput('gamepad');
+    }
+    this.trackConnectedInputActivity();
   }
 
   private pollTouchInput(): void {
@@ -1434,6 +1496,18 @@ export class RaycastScene extends Phaser.Scene {
     if (this.touchInput.consumePressed('navDown')) this.handlePauseMenuDown();
     if (this.touchInput.consumePressed('navLeft')) this.handlePauseMenuLeft();
     if (this.touchInput.consumePressed('navRight')) this.handlePauseMenuRight();
+    if (
+      this.touchInput.consumePressed('navUp') ||
+      this.touchInput.consumePressed('navDown') ||
+      this.touchInput.consumePressed('navLeft') ||
+      this.touchInput.consumePressed('navRight') ||
+      this.touchInput.consumePressed('confirm') ||
+      this.touchInput.consumePressed('cancel') ||
+      this.touchInput.consumePressed('pause')
+    ) {
+      this.markDetectedActiveInput('touch');
+    }
+    this.trackConnectedInputActivity();
   }
 
   private resetRuntimeState(): void {
@@ -2121,10 +2195,12 @@ export class RaycastScene extends Phaser.Scene {
 
   private refreshPauseMenuBody(): void {
     const volPct = Math.round(this.audioMasterVolume * 100);
+    const activeInput = this.resolveSceneActiveInput();
     if (this.pausePanelMode === 'control') {
       this.pauseMenuBodyText.setText(
         formatRaycastControlPauseBody(
           {
+            activeInput,
             controlStatus: this.gamepadInput.isConnected() ? 'DETECTADO' : 'SIN CONTROL',
             selectionIndex: this.pauseControlSelectionIndex,
             mouseSensitivity: `x${getMouseSensitivity(this.registry).toFixed(2)}`,
@@ -2158,6 +2234,7 @@ export class RaycastScene extends Phaser.Scene {
     this.pauseMenuBodyText.setText(
       formatRaycastPauseMenuMxBody(
         {
+          activeInput,
           volumePct: volPct,
           selectionIndex: this.pauseSelectionIndex,
           worldLine: this.pauseRunBannerLine,
