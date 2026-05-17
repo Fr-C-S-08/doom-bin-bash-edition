@@ -220,7 +220,7 @@ export class PrologueScene extends Phaser.Scene {
       .setDepth(5);
 
     this.add
-      .text(width * 0.5, height - 18, '// FRAGMENTO DE SEÑAL  ·  Made by Hotzh3', {
+      .text(width * 0.5, height - 18, '// FRAGMENTO DE SEÑAL  ·  A Doom Bin Bash Project', {
         fontFamily: 'monospace',
         fontSize: '10px',
         color: ACCENT_COLOR,

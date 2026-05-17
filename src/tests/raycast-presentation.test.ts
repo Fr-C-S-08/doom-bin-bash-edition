@@ -291,7 +291,10 @@ describe('raycast presentation helpers', () => {
     expect(copy.title).toBe('DOOM BIN BASH EDITION');
     expect(copy.press3d).toBe('A / CLICK — INICIAR SECTOR 3D');
     expect(copy.subtitle).toContain('RAYCAST');
-    expect(copy.footer).toBe('Made by Hotzh3');
+    expect(copy.footerCredit).toBe('A Doom Bin Bash Project');
+    expect(copy.footerInputHints).toContain('A iniciar');
+    expect(copy.footerInputHints).toContain('Start iniciar');
+    expect(copy.footerCredit).not.toMatch(/Hotzh3/i);
   });
 
   it('keeps the main menu layout ordered title then start option', () => {
@@ -303,19 +306,26 @@ describe('raycast presentation helpers', () => {
     expect(layout.option3dY).toBeLessThan(layout.difficultyY);
     expect(layout.difficultyY).toBeLessThan(layout.settingsY);
     expect(layout.titleFrameCenterY).toBeLessThan(layout.titleY);
-    expect(layout.footerY).toBeGreaterThan(0);
+    expect(layout.footerCreditY).toBeLessThan(layout.footerHintsY);
+    expect(layout.footerHintsY).toBeGreaterThan(0);
+    expect(layout.footerMaxWidth).toBeGreaterThan(200);
   });
 
   it('keeps main menu vertical ordering on compact viewports', () => {
     const layouts = [
       { width: 640, height: 360 },
       { width: 854, height: 480 },
-      { width: 1280, height: 720 }
+      { width: 1280, height: 720 },
+      { width: 1024, height: 768 }
     ];
 
     for (const { width, height } of layouts) {
       const layout = buildMainMenuLayout(width, height);
       expect(layout.titleY).toBeLessThan(layout.option3dY);
+      expect(layout.settingsY).toBeLessThan(layout.footerCreditY);
+      expect(layout.footerCreditY).toBeLessThan(layout.footerHintsY);
+      expect(layout.footerHintsY).toBeLessThanOrEqual(height - 20);
+      expect(layout.footerMaxWidth).toBeLessThanOrEqual(width - 40);
     }
   });
 });

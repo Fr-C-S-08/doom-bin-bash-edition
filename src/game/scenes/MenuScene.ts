@@ -224,18 +224,36 @@ export class MenuScene extends Phaser.Scene {
       .setDepth(8)
       .setAlpha(0.82);
 
+    const shortFooter = width <= 720 || height <= 405;
+    const footerFontSize = shortFooter ? '9px' : '10px';
+
     this.add
-      .text(layout.centerX, layout.footerY, `${copy.footer}  |  A iniciar  |  B volver  |  Start iniciar`, {
+      .text(layout.centerX, layout.footerCreditY, copy.footerCredit, {
         fontFamily: 'monospace',
-        fontSize: '10px',
+        fontSize: footerFontSize,
         fontStyle: '700',
-        color: '#5c6a7c',
+        color: '#6d7d90',
         align: 'center',
-        wordWrap: { width: width - 48 }
+        letterSpacing: 0.6,
+        wordWrap: { width: layout.footerMaxWidth }
       })
       .setOrigin(0.5, 1)
       .setDepth(8)
-      .setAlpha(0.85);
+      .setAlpha(0.78);
+
+    this.add
+      .text(layout.centerX, layout.footerHintsY, copy.footerInputHints, {
+        fontFamily: 'monospace',
+        fontSize: footerFontSize,
+        fontStyle: '700',
+        color: '#5c6a7c',
+        align: 'center',
+        letterSpacing: 0.35,
+        wordWrap: { width: layout.footerMaxWidth }
+      })
+      .setOrigin(0.5, 1)
+      .setDepth(8)
+      .setAlpha(0.88);
 
     this.difficultyHintText = this.add
       .text(layout.centerX, layout.difficultyY, this.buildDifficultyMenuLine(), {
