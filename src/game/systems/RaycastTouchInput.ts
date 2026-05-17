@@ -86,9 +86,14 @@ interface TouchPointerState {
 
 const TOUCH_MAX_LOOK_DELTA_RADIANS = Math.PI * 0.33;
 const TOUCH_MAX_LOOK_PIXEL_DELTA = 96;
+const TOUCH_MIN_LOOK_PIXEL_DELTA = 1.75;
+const TOUCH_LOOK_SMOOTH_ALPHA = 0.42;
+const TOUCH_PALM_REJECT_BOTTOM_FRAC = 0.07;
 const TOUCH_DEFAULT_BUTTON_SCALE = 1;
 const TOUCH_DEFAULT_LOOK_SENSITIVITY = 0.011;
 const TOUCH_DEFAULT_JOYSTICK_DEADZONE = 0.18;
+const TOUCH_MAX_JOYSTICK_POINTERS = 1;
+const TOUCH_MAX_LOOK_POINTERS = 1;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -272,6 +277,7 @@ export class RaycastTouchInput {
   private statusMessage: string | null = null;
   private statusMessageUntil = 0;
   private lookSuppressionFrames = 0;
+  private smoothedLookX = 0;
   private audioUnlocked = false;
   private lastViewport = { width: 0, height: 0 };
   private wasTouchVisible = false;
@@ -377,6 +383,7 @@ export class RaycastTouchInput {
 
   /** Drop active contacts when pausing, losing focus, or rebuilding overlay. */
   resetActiveContactState(): void {
+    this.smoothedLookX = 0;
     this.releaseCapturedPointers();
     clearRaycastTouchTransientState({
       activePointers: this.activePointers,
@@ -437,6 +444,10 @@ export class RaycastTouchInput {
     this.currentMove = this.computeJoystickVector();
     if (this.lookSuppressionFrames > 0) {
       this.currentLook = { x: 0, y: 0 };
+      this.smoothedLookX = 0;
+    } else if (!Array.from(this.activePointers.values()).some((pointer) => pointer.kind === 'look')) {
+      this.currentLook = { x: 0, y: 0 };
+      this.smoothedLookX = 0;
     }
   }
 
@@ -477,6 +488,21 @@ export class RaycastTouchInput {
   suppressLookInput(frames = 2): void {
     const safeFrames = Math.max(1, Math.floor(frames));
     this.lookSuppressionFrames = Math.max(this.lookSuppressionFrames, safeFrames);
+    this.smoothedLookX = 0;
+  }
+
+  private isLikelyPalmRestTouch(x: number, y: number): boolean {
+    const palmBandY = this.layout.height * (1 - TOUCH_PALM_REJECT_BOTTOM_FRAC);
+    if (y < palmBandY) return false;
+    const inJoystick =
+      Math.hypot(x - this.layout.joystickCenterX, y - this.layout.joystickCenterY) <= this.layout.joystickRadius * 1.15;
+    if (inJoystick) return false;
+    if (this.findButtonAt(x, y)) return false;
+    return x >= this.layout.width * 0.22;
+  }
+
+  private countPointers(kind: TouchPointerKind): number {
+    return Array.from(this.activePointers.values()).filter((pointer) => pointer.kind === kind).length;
   }
 
   private shouldDisplayTouchControls(settings: RaycastTouchSettings, width: number, height: number): boolean {
@@ -714,8 +740,10 @@ export class RaycastTouchInput {
     this.maybePreventDefault(pointer, true);
 
     if (this.mode === 'gameplay') {
+      if (this.isLikelyPalmRestTouch(x, y)) return;
       const leftZone = x <= this.layout.width * 0.34;
       if (leftZone) {
+        if (this.countPointers('joystick') >= TOUCH_MAX_JOYSTICK_POINTERS) return;
         this.activePointers.set(pointer.id, {
           kind: 'joystick',
           pointerId: pointer.id,
@@ -726,6 +754,7 @@ export class RaycastTouchInput {
         });
         return;
       }
+      if (this.countPointers('look') >= TOUCH_MAX_LOOK_POINTERS) return;
       this.activePointers.set(pointer.id, {
         kind: 'look',
         pointerId: pointer.id,
@@ -771,11 +800,16 @@ export class RaycastTouchInput {
     const deltaY = pointer.y - state.lastY;
     state.lastX = pointer.x;
     state.lastY = pointer.y;
-    const sensitivity = this.getSettings().lookSensitivity;
+    if (Math.abs(deltaX) < TOUCH_MIN_LOOK_PIXEL_DELTA && Math.abs(deltaY) < TOUCH_MIN_LOOK_PIXEL_DELTA) {
+      this.currentLook = { x: 0, y: 0 };
+      return;
+    }
     const clampPixels = (value: number): number => clamp(value, -TOUCH_MAX_LOOK_PIXEL_DELTA, TOUCH_MAX_LOOK_PIXEL_DELTA);
+    const rawLookX = clampRaycastTouchLookDelta(clampPixels(deltaX) * TOUCH_DEFAULT_LOOK_SENSITIVITY);
+    this.smoothedLookX += (rawLookX - this.smoothedLookX) * TOUCH_LOOK_SMOOTH_ALPHA;
     this.currentLook = {
-      x: clampRaycastTouchLookDelta(clampPixels(deltaX) * sensitivity * TOUCH_DEFAULT_LOOK_SENSITIVITY),
-      y: clampRaycastTouchLookDelta(clampPixels(deltaY) * sensitivity * TOUCH_DEFAULT_LOOK_SENSITIVITY)
+      x: this.smoothedLookX,
+      y: 0
     };
   }
 
@@ -818,7 +852,10 @@ export class RaycastTouchInput {
     const hasJoystick = Array.from(this.activePointers.values()).some((pointer) => pointer.kind === 'joystick');
     const hasLook = Array.from(this.activePointers.values()).some((pointer) => pointer.kind === 'look');
     this.currentMove = this.mode === 'gameplay' && hasJoystick ? this.currentMove : { x: 0, y: 0 };
-    this.currentLook = hasLook && this.mode === 'gameplay' ? this.currentLook : { x: 0, y: 0 };
+    if (!hasLook || this.mode !== 'gameplay') {
+      this.currentLook = { x: 0, y: 0 };
+      this.smoothedLookX = 0;
+    }
     for (const button of this.buttons.values()) {
       if (button.pointerId === null) continue;
       const stillHeld = Array.from(this.activePointers.values()).some((pointer) => pointer.pointerId === button.pointerId);

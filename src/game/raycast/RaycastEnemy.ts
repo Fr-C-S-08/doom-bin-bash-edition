@@ -23,6 +23,8 @@ export interface RaycastEnemy {
   /** Brief combat disruption after impact — keeps encounters readable without new AI states. */
   staggerUntil: number;
   hitFlashUntil: number;
+  /** Visual-only lateral kick from impacts (radians). */
+  flinchOffsetRad: number;
   deathBurstUntil: number;
   patrolWaypoints: PatrolWaypoint[];
   patrolWaypointIndex: number;
@@ -75,6 +77,7 @@ export function createRaycastEnemy(spawn: RaycastEnemySpawn): RaycastEnemy {
     attackWindupUntil: 0,
     staggerUntil: 0,
     hitFlashUntil: 0,
+    flinchOffsetRad: 0,
     deathBurstUntil: 0,
     patrolWaypoints: buildRaycastPatrolWaypoints(homeX, homeY, spawn.id),
     patrolWaypointIndex: 0,

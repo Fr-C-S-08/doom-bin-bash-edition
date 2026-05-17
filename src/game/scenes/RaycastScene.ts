@@ -19,6 +19,20 @@ import {
 } from '../systems/AudioFeedbackSystem';
 import type { DirectorEvent } from '../systems/DirectorEvents';
 import { DIRECTOR_STATE_LABELS, type DirectorDebugInfo, type DirectorState } from '../systems/DirectorState';
+import {
+  applyWeaponFireFeel,
+  applyWeaponSwitchFeel,
+  buildWeaponViewFeel,
+  createCombatFeelRuntimeState,
+  getCombatImpactAudioOptions,
+  getDeathFeedbackProfile,
+  getHitMarkerFeedbackTiming,
+  getMuzzleFlashDecayMs,
+  getWeaponFireAudioPitch,
+  shouldSkipGameplayDuringFreeze,
+  tickCombatFeelRuntime,
+  type CombatFeelRuntimeState
+} from '../raycast/RaycastCombatFeel';
 import { getRaycastCrosshairTargetInfo, RaycastCombatSystem } from '../raycast/RaycastCombatSystem';
 import {
   cloneRaycastEnemies,
@@ -220,6 +234,8 @@ import { palette } from '../theme/palette';
 import { getSaveManager } from '../save/SaveManager';
 import { prepareGameSession } from '../save/persistSessionSettings';
 import {
+  getAimAssistLevel,
+  getCameraSmoothing,
   getGamepadInvertY,
   getGamepadLeftDeadzone,
   getGamepadRightDeadzone,
@@ -411,6 +427,8 @@ export class RaycastScene extends Phaser.Scene {
   private finalSummaryText!: Phaser.GameObjects.Text;
   private finalHintText!: Phaser.GameObjects.Text;
   private weaponOverlayFlashUntil = 0;
+  private combatFeelState: CombatFeelRuntimeState = createCombatFeelRuntimeState();
+  private freezeFrameUntil = 0;
   private bossTelegraphById = new Map<string, boolean>();
   private lastBossPhaseById = new Map<string, 1 | 2 | 3>();
   private lastCombatMessage: string = RAYCAST_ATMOSPHERE.messages.intro;
@@ -767,7 +785,23 @@ export class RaycastScene extends Phaser.Scene {
       () => getMouseSensitivity(this.registry),
       this.gamepadInput,
       this.touchInput,
-      () => !this.gamePaused
+      () => !this.gamePaused,
+      {
+        getLookFeelSettings: () => ({
+          aimAssist: getAimAssistLevel(this.registry),
+          cameraSmoothing: getCameraSmoothing(this.registry),
+          stickSensitivity: getGamepadSensitivity(this.registry),
+          touchLookSensitivity: getTouchLookSensitivity(this.registry),
+          gamepadLookDeadzone: getGamepadRightDeadzone(this.registry),
+          touchDeadzone: getTouchJoystickDeadzone(this.registry)
+        }),
+        getLookContext: () => ({
+          enemies: this.enemies,
+          wallDistance: castRay(this.map, this.player.x, this.player.y, this.player.angle, this.player.angle).distance
+        }),
+        isGamepadAimActive: () => this.gamepadInput.isConnected() && !this.gamePaused,
+        isTouchAimActive: () => this.touchInput.isActive() && !this.gamePaused
+      }
     );
     this.controller.create();
     this.controller.setMoveSpeedMultiplier(
@@ -1195,7 +1229,13 @@ export class RaycastScene extends Phaser.Scene {
     this.pollGamepadInput();
     this.pollTouchInput();
     this.combat?.tick(this.time.now);
-    if (this.playerAlive && !this.levelComplete && !this.gamePaused) {
+    const deltaSeconds = delta / 1000;
+    const weapon = this.combat.getCurrentWeapon();
+    const reloadBlend = this.combat.getReloadBlend(this.time.now);
+    const moving = Math.hypot(this.player.velocity.x, this.player.velocity.y) > 0.05;
+    tickCombatFeelRuntime(this.combatFeelState, this.time.now, deltaSeconds, moving, weapon, reloadBlend);
+    const frozen = shouldSkipGameplayDuringFreeze(this.time.now, this.freezeFrameUntil);
+    if (this.playerAlive && !this.levelComplete && !this.gamePaused && !frozen) {
       this.controller.update(delta);
       this.updatePlayerMetrics(delta);
       this.updateLevelState();
@@ -1208,7 +1248,10 @@ export class RaycastScene extends Phaser.Scene {
       this.applyPassiveHeal(delta);
     }
     const atmosphere = this.getAtmosphereOptions();
-    this.raycastRenderer.render(this.player, GAME_WIDTH, GAME_HEIGHT, atmosphere);
+    const viewKick = this.combatFeelState.cameraKickRad;
+    const renderPlayer =
+      viewKick > 0.0002 ? { ...this.player, angle: this.player.angle + viewKick } : this.player;
+    this.raycastRenderer.render(renderPlayer, GAME_WIDTH, GAME_HEIGHT, atmosphere);
     this.refreshBillboardCache();
     this.raycastRenderer.renderBillboards(this.player, this.cachedBillboards, GAME_WIDTH, GAME_HEIGHT);
     this.raycastRenderer.renderEnemies(this.player, this.enemies, GAME_WIDTH, GAME_HEIGHT, this.time.now, atmosphere);
@@ -1216,11 +1259,13 @@ export class RaycastScene extends Phaser.Scene {
       this.raycastRenderer.renderBoss(this.player, boss, GAME_WIDTH, GAME_HEIGHT, this.time.now, atmosphere);
     });
     this.raycastRenderer.renderEnemyProjectiles(this.player, this.enemyProjectiles, GAME_WIDTH, GAME_HEIGHT);
+    const muzzleAlpha = this.getWeaponOverlayFlashAlpha();
     this.raycastRenderer.renderWeaponOverlay(
-      this.combat.getCurrentWeapon(),
+      weapon,
       GAME_WIDTH,
       GAME_HEIGHT,
-      this.getWeaponOverlayFlashAlpha()
+      muzzleAlpha,
+      buildWeaponViewFeel(this.combatFeelState, weapon, this.time.now, moving, reloadBlend, muzzleAlpha)
     );
     this.corruptionVeil.setAlpha(this.time.now < this.blackoutPulseUntil ? Math.max(0.28, atmosphere.corruptionAlpha) : atmosphere.corruptionAlpha);
     const objectiveState = this.getObjectiveState();
@@ -1447,6 +1492,8 @@ export class RaycastScene extends Phaser.Scene {
     this.blockedHintUntil = 0;
     this.lastLowHealthWarningAt = null;
     this.weaponOverlayFlashUntil = 0;
+    this.combatFeelState = createCombatFeelRuntimeState();
+    this.freezeFrameUntil = 0;
     this.nextAmbientCueAt = 0;
     const eventRng = createSeededLevelEventRng(`${this.currentLevel.id}:${Math.floor(this.time.now)}`);
     this.activeLevelEvent = selectRaycastLevelEvent({
@@ -1695,10 +1742,14 @@ export class RaycastScene extends Phaser.Scene {
       this.runBossPelletsFired += result.pelletCount;
     }
 
+    applyWeaponFireFeel(this.combatFeelState, result.weaponKind, this.time.now);
     this.flashMuzzle();
     const weaponAudio = getWeaponAudioPlan(result.weaponKind);
-    const firePitchMul = Phaser.Math.FloatBetween(0.97, 1.04);
-    this.audioFeedback.play(weaponAudio.cue, weaponAudio.intensity, this.time.now, { pitchMul: firePitchMul });
+    const firePitchMul = getWeaponFireAudioPitch(result.weaponKind);
+    this.audioFeedback.play(weaponAudio.cue, weaponAudio.intensity, this.time.now, {
+      pitchMul: firePitchMul,
+      lowFreqBoost: result.weaponKind === 'SHOTGUN' ? 1.14 : result.weaponKind === 'LAUNCHER' ? 1.06 : 1
+    });
     this.applyCombatShake(FIRE_SHAKE_DURATION_MS, Math.min(FIRE_SHAKE_INTENSITY_CAP, FIRE_SHAKE_INTENSITY));
     if (result.weaponKind === 'SHOTGUN') this.gamepadInput?.vibrate('light');
 
@@ -1742,13 +1793,23 @@ export class RaycastScene extends Phaser.Scene {
           this.applyCombatShake(210, 0.003);
           this.gamepadInput?.vibrate('boss');
         }
-        const impactPitch = Phaser.Math.FloatBetween(0.97, 1.03);
+        const bossImpactAudio = getCombatImpactAudioOptions(result.weaponKind, killed, bossCrit);
         if (killed) {
-          this.audioFeedback.play('kill', 1.02, this.time.now, { pitchMul: impactPitch });
+          this.freezeFrameUntil = this.time.now + getDeathFeedbackProfile(true).freezeMs;
+          this.audioFeedback.play('kill', 1.02 * bossImpactAudio.intensityMul, this.time.now, {
+            pitchMul: bossImpactAudio.pitchMul,
+            lowFreqBoost: bossImpactAudio.lowFreqBoost
+          });
         } else if (bossCrit) {
-          this.audioFeedback.play('hitCrit', 0.96, this.time.now, { pitchMul: impactPitch });
+          this.audioFeedback.play('hitCrit', 0.96 * bossImpactAudio.intensityMul, this.time.now, {
+            pitchMul: bossImpactAudio.pitchMul,
+            lowFreqBoost: bossImpactAudio.lowFreqBoost
+          });
         } else {
-          this.audioFeedback.play('hit', 0.86, this.time.now, { pitchMul: impactPitch });
+          this.audioFeedback.play('hit', 0.86 * bossImpactAudio.intensityMul, this.time.now, {
+            pitchMul: bossImpactAudio.pitchMul,
+            lowFreqBoost: bossImpactAudio.lowFreqBoost
+          });
         }
         this.pulseCrosshair(killed ? '#ff5b6f' : bossCrit ? '#8dffcf' : '#ffffff', killed ? 124 : bossCrit ? 102 : 88);
         this.flashHitMarker(killed, false, bossCrit);
@@ -1778,13 +1839,23 @@ export class RaycastScene extends Phaser.Scene {
       this.applyCombatShake(102, 0.00285);
       this.pulseFeedback(0xff8a3d, 0.075, 102);
     }
-    const hitPitch = Phaser.Math.FloatBetween(0.96, 1.03);
+    const impactAudio = getCombatImpactAudioOptions(result.weaponKind, result.killed, result.anyCrit);
     if (result.killed) {
-      this.audioFeedback.play('kill', 1.02, this.time.now, { pitchMul: hitPitch });
+      this.freezeFrameUntil = this.time.now + getDeathFeedbackProfile(false).freezeMs;
+      this.audioFeedback.play('kill', 1.02 * impactAudio.intensityMul, this.time.now, {
+        pitchMul: impactAudio.pitchMul,
+        lowFreqBoost: impactAudio.lowFreqBoost
+      });
     } else if (result.anyCrit) {
-      this.audioFeedback.play('hitCrit', 0.95, this.time.now, { pitchMul: hitPitch });
+      this.audioFeedback.play('hitCrit', 0.95 * impactAudio.intensityMul, this.time.now, {
+        pitchMul: impactAudio.pitchMul,
+        lowFreqBoost: impactAudio.lowFreqBoost
+      });
     } else {
-      this.audioFeedback.play('hit', 0.84, this.time.now, { pitchMul: hitPitch });
+      this.audioFeedback.play('hit', 0.84 * impactAudio.intensityMul, this.time.now, {
+        pitchMul: impactAudio.pitchMul,
+        lowFreqBoost: impactAudio.lowFreqBoost
+      });
     }
     if (result.killed) {
       this.cameras.main.flash(48, 255, 236, 210, false);
@@ -1858,18 +1929,17 @@ export class RaycastScene extends Phaser.Scene {
   private flashHitMarker(killed: boolean, splash: boolean, crit = false): void {
     const label = killed ? '*' : crit ? '!' : splash ? 'xx' : 'x';
     const color = killed ? '#ff3358' : crit ? '#5dffc8' : splash ? '#ffb36b' : '#ffffff';
-    const baseScale = killed ? 1.64 : crit ? 1.42 : splash ? 1.12 : 1.06;
-    const endScale = killed ? 2.12 : crit ? 1.82 : splash ? 1.52 : 1.48;
+    const timing = getHitMarkerFeedbackTiming(killed, crit, splash);
     this.hitMarker.setText(label);
     this.hitMarker.setColor(color);
-    this.hitMarker.setScale(baseScale);
+    this.hitMarker.setScale(timing.scaleStart);
     this.hitMarker.setAlpha(0.98);
     this.tweens.killTweensOf(this.hitMarker);
     this.tweens.add({
       targets: this.hitMarker,
       alpha: 0,
-      scale: endScale,
-      duration: killed ? 186 : crit ? 128 : splash ? 104 : 98,
+      scale: timing.scaleEnd,
+      duration: timing.durationMs,
       ease: 'Quad.easeOut'
     });
   }
@@ -1901,8 +1971,7 @@ export class RaycastScene extends Phaser.Scene {
 
   private getWeaponOverlayFlashAlpha(): number {
     if (this.time.now >= this.weaponOverlayFlashUntil) return 0;
-    const weapon = this.combat.getCurrentWeapon();
-    const decayWindow = weapon === 'LAUNCHER' ? 226 : weapon === 'SHOTGUN' ? 136 : 70;
+    const decayWindow = getMuzzleFlashDecayMs(this.combat.getCurrentWeapon());
     return Phaser.Math.Clamp((this.weaponOverlayFlashUntil - this.time.now) / decayWindow, 0, 1);
   }
 
@@ -1922,7 +1991,9 @@ export class RaycastScene extends Phaser.Scene {
   private switchWeapon(slot: number): void {
     if (!this.canHandleRaycastInput()) return;
     if (!this.playerAlive || this.levelComplete) return;
+    const previous = this.combat.getCurrentWeapon();
     this.combat.switchWeaponSlot(slot);
+    applyWeaponSwitchFeel(this.combatFeelState, previous, this.combat.getCurrentWeapon(), this.time.now);
     this.setCombatMessage(`WEAPON ROUTED: ${this.combat.getWeaponLabel()}`);
   }
 

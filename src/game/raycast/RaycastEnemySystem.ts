@@ -1,6 +1,7 @@
 import { getEnemyConfig } from '../entities/enemyConfig';
 import { decideEnemyBehavior, getDirection } from '../systems/EnemyBehaviorSystem';
 import type { MovementVector } from '../systems/MovementSystem';
+import { decayEnemyFlinch } from './RaycastCombatFeel';
 import { castRay, type RaycastMap } from './RaycastMap';
 import { collides } from './RaycastMovement';
 import { isRaycastEnemyTelegraphing, type RaycastEnemy } from './RaycastEnemy';
@@ -87,7 +88,9 @@ export function updateRaycastEnemies(
   const spawnedProjectiles: RaycastEnemyProjectile[] = [];
   const flashActivations: { enemyId: string; baseDurationMs: number }[] = [];
 
+  const deltaSeconds = deltaMs / 1000;
   enemies.forEach((enemy) => {
+    decayEnemyFlinch(enemy, deltaSeconds);
     if (!enemy.alive || !player.alive) return;
     if (isRaycastEnemyTelegraphing(enemy, time)) return;
     if ((enemy.staggerUntil ?? 0) > time) {

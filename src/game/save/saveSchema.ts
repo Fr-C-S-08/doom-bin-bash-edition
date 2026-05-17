@@ -1,3 +1,4 @@
+import type { AimAssistLevel } from '../raycast/RaycastLookFeel';
 import type { RaycastMasteryUnlockState } from '../raycast/RaycastMasteryEnding';
 import type { RaycastPlaytestTelemetryRecord } from '../raycast/RaycastTelemetry';
 
@@ -26,6 +27,8 @@ export interface PersistedSettings {
   touchButtonScale: number;
   touchJoystickDeadzone: number;
   preferFullscreen: boolean;
+  aimAssist: AimAssistLevel;
+  cameraSmoothing: number;
 }
 
 export interface RaycastStatistics {
@@ -105,7 +108,9 @@ export function createDefaultSettings(): PersistedSettings {
     touchLookSensitivity: 1,
     touchButtonScale: 1,
     touchJoystickDeadzone: 0.18,
-    preferFullscreen: false
+    preferFullscreen: false,
+    aimAssist: 'low',
+    cameraSmoothing: 0.2
   };
 }
 
@@ -210,7 +215,12 @@ function sanitizeSettings(value: unknown): PersistedSettings {
     touchLookSensitivity: readNumber(value.touchLookSensitivity, defaults.touchLookSensitivity),
     touchButtonScale: readNumber(value.touchButtonScale, defaults.touchButtonScale),
     touchJoystickDeadzone: readNumber(value.touchJoystickDeadzone, defaults.touchJoystickDeadzone),
-    preferFullscreen: readBoolean(value.preferFullscreen, defaults.preferFullscreen)
+    preferFullscreen: readBoolean(value.preferFullscreen, defaults.preferFullscreen),
+    aimAssist:
+      value.aimAssist === 'off' || value.aimAssist === 'low' || value.aimAssist === 'normal'
+        ? value.aimAssist
+        : defaults.aimAssist,
+    cameraSmoothing: Math.min(0.85, Math.max(0, readNumber(value.cameraSmoothing, defaults.cameraSmoothing)))
   };
 }
 

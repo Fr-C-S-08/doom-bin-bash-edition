@@ -108,7 +108,8 @@ export function readRaycastGamepadFrame(
   settings: RaycastGamepadSettings
 ): RaycastGamepadFrame {
   const moveAxes = normalizeRaycastGamepadStick(gamepad.axes[0] ?? 0, gamepad.axes[1] ?? 0, settings.leftDeadzone);
-  const lookAxes = normalizeRaycastGamepadStick(gamepad.axes[2] ?? 0, gamepad.axes[3] ?? 0, settings.rightDeadzone);
+  const lookRawX = gamepad.axes[2] ?? 0;
+  const lookRawY = gamepad.axes[3] ?? 0;
   const heldActions = new Set<RaycastGamepadAction>();
 
   const isButtonDown = (buttonIndex: number): boolean => {
@@ -134,10 +135,10 @@ export function readRaycastGamepadFrame(
     y: -moveAxes.y
   };
 
-  // Look axes are scaled separately so the right stick feels readable without mouse-level jumps.
+  // Raw look axes — deadzone, curve, and sensitivity are applied in RaycastLookFeel.
   const look: MovementVector = {
-    x: lookAxes.x * Math.max(0.1, settings.lookSensitivity),
-    y: (settings.invertLookY ? 1 : -1) * lookAxes.y * Math.max(0.1, settings.lookSensitivity)
+    x: lookRawX,
+    y: (settings.invertLookY ? 1 : -1) * lookRawY
   };
 
   return {

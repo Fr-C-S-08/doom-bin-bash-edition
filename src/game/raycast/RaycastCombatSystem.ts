@@ -8,6 +8,7 @@ import type { RaycastPlayerState } from './RaycastPlayerController';
 import type { ProjectileSpawn, WeaponKind } from '../systems/WeaponTypes';
 import { formatRaycastEnemyTargetLabel } from './RaycastHud';
 import { applyRaycastEnemyKnockback } from './RaycastHitKnockback';
+import { applyEnemyHitFlinch, getDeathFeedbackProfile } from './RaycastCombatFeel';
 import type { EnemyKind } from '../types/game';
 
 export interface RaycastCombatResult {
@@ -37,7 +38,6 @@ export const RAYCAST_CRIT_DAMAGE_RATIO = 0.34;
 export const RAYCAST_DEATH_BURST_MS = 405;
 const HIT_FLASH_MS = RAYCAST_HIT_FLASH_MS;
 const CRIT_FLASH_EXTRA_MS = RAYCAST_CRIT_FLASH_EXTRA_MS;
-const DEATH_BURST_MS = RAYCAST_DEATH_BURST_MS;
 const GRID_SCALE = 100;
 const STAGGER_BASE_MS: Record<WeaponKind, number> = {
   PISTOL: 55,
@@ -87,6 +87,10 @@ export class RaycastCombatSystem {
 
   isReloading(time: number): boolean {
     return this.weapons.isReloading(this.weapons.getCurrentWeapon(), time);
+  }
+
+  getReloadBlend(time: number): number {
+    return this.weapons.getReloadBlend(this.weapons.getCurrentWeapon(), time);
   }
 
   getAmmoState(): { current: number; capacity: number } {
@@ -191,7 +195,11 @@ export class RaycastCombatSystem {
     target.hitFlashUntil = time + HIT_FLASH_MS + (directCrit ? CRIT_FLASH_EXTRA_MS : 0);
     if ((target.frontalDamageReduction ?? 0) > 0) target.shieldPulseUntil = time + 180;
     applyRaycastHitStagger(target, projectile.weaponKind, time, false);
-    if (directKilled) target.deathBurstUntil = time + DEATH_BURST_MS;
+    applyEnemyHitFlinch(target, projectile.weaponKind, directCrit);
+    if (directKilled) {
+      const deathFeel = getDeathFeedbackProfile(false);
+      target.deathBurstUntil = time + deathFeel.burstDurationMs;
+    }
     const splashImpacts = this.applyExplosionSplash(target, projectile, enemies, map, time);
     const killedEnemyKinds: EnemyKind[] = [];
     if (directKilled) killedEnemyKinds.push(target.kind);
@@ -239,12 +247,14 @@ export class RaycastCombatSystem {
       const splashCrit = !splKilled && splashDamage >= splashCritTh;
       if (splashCrit) anyCrit = true;
       if (splKilled) {
-        enemy.deathBurstUntil = time + DEATH_BURST_MS;
+        const deathFeel = getDeathFeedbackProfile(false);
+        enemy.deathBurstUntil = time + deathFeel.burstDurationMs;
         killCount += 1;
         killedKinds.push(enemy.kind);
       }
       applyRaycastHitStagger(enemy, projectile.weaponKind, time, true);
       enemy.hitFlashUntil = time + HIT_FLASH_MS + (splashCrit ? CRIT_FLASH_EXTRA_MS : 0);
+      applyEnemyHitFlinch(enemy, projectile.weaponKind, splashCrit);
       damage += splashDamage;
     });
 

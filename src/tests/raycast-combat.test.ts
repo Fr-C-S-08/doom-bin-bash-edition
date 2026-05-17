@@ -33,6 +33,7 @@ const createEnemy = (overrides: Partial<RaycastEnemy> = {}): RaycastEnemy => {
     attackWindupUntil: 0,
     staggerUntil: 0,
     hitFlashUntil: 0,
+    flinchOffsetRad: 0,
     deathBurstUntil: 0,
     patrolWaypoints: buildRaycastPatrolWaypoints(x, y, id),
     patrolWaypointIndex: 0,

@@ -2,7 +2,11 @@ import Phaser from 'phaser';
 import { AudioFeedbackSystem } from '../systems/AudioFeedbackSystem';
 import { RAYCAST_CSS, RAYCAST_PALETTE } from '../raycast/RaycastPalette';
 import { prepareGameSession, setPreferFullscreenSaved } from '../save/persistSessionSettings';
+import { formatAimAssistLabel } from '../raycast/RaycastLookFeel';
 import {
+  cycleAimAssistSetting,
+  getAimAssistLevel,
+  getCameraSmoothing,
   getGamepadInvertY,
   getGamepadLeftDeadzone,
   getGamepadRightDeadzone,
@@ -16,6 +20,7 @@ import {
   getTouchControlsEnabled,
   getTouchJoystickDeadzone,
   getTouchLookSensitivity,
+  setCameraSmoothing,
   setGamepadInvertY,
   setGamepadLeftDeadzone,
   setGamepadRightDeadzone,
@@ -42,6 +47,8 @@ const ROW_KEYS = [
   'control',
   'mouse',
   'pad_sens',
+  'aim_assist',
+  'camera_smooth',
   'pad_deadzone_left',
   'pad_deadzone_right',
   'invert_y',
@@ -251,6 +258,13 @@ export class SettingsScene extends Phaser.Scene {
       const next = Math.round((getGamepadSensitivity(this.registry) + direction * 0.05) * 100) / 100;
       setGamepadSensitivity(this.registry, next);
       this.audioPreview.play('uiConfirm', 0.62, this.time.now);
+    } else if (row === 'aim_assist') {
+      cycleAimAssistSetting(this.registry, direction);
+      this.audioPreview.play('difficultySelect', 0.75, this.time.now);
+    } else if (row === 'camera_smooth') {
+      const next = Math.round((getCameraSmoothing(this.registry) + direction * 0.05) * 100) / 100;
+      setCameraSmoothing(this.registry, next);
+      this.audioPreview.play('uiConfirm', 0.62, this.time.now);
     } else if (row === 'pad_deadzone_left') {
       const next = Math.round((getGamepadLeftDeadzone(this.registry) + direction * 0.01) * 100) / 100;
       setGamepadLeftDeadzone(this.registry, next);
@@ -300,6 +314,8 @@ export class SettingsScene extends Phaser.Scene {
   private refreshBody(): void {
     const sens = getMouseSensitivity(this.registry).toFixed(2);
     const padSens = getGamepadSensitivity(this.registry).toFixed(2);
+    const aimAssist = formatAimAssistLabel(getAimAssistLevel(this.registry));
+    const cameraSmooth = getCameraSmoothing(this.registry).toFixed(2);
     const padDeadzoneLeft = getGamepadLeftDeadzone(this.registry).toFixed(2);
     const padDeadzoneRight = getGamepadRightDeadzone(this.registry).toFixed(2);
     const invertY = getGamepadInvertY(this.registry) ? 'SÍ' : 'NO';
@@ -322,6 +338,8 @@ export class SettingsScene extends Phaser.Scene {
     label('control', `CONTROL · ${controlStatus}`);
     label('mouse', `RATÓN · sensibilidad ×${sens}`);
     label('pad_sens', `MANDO · sensibilidad ×${padSens}`);
+    label('aim_assist', `APUNTADO · asistencia ${aimAssist}`);
+    label('camera_smooth', `CÁMARA · suavizado ${cameraSmooth}`);
     label('pad_deadzone_left', `MANDO · deadzone izq ${padDeadzoneLeft}`);
     label('pad_deadzone_right', `MANDO · deadzone der ${padDeadzoneRight}`);
     label('invert_y', `MANDO · invertir eje Y ${invertY}`);

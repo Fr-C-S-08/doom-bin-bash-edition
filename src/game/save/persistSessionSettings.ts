@@ -13,6 +13,8 @@ import {
   getTouchControlsEnabled,
   getTouchJoystickDeadzone,
   getTouchLookSensitivity,
+  getAimAssistLevel,
+  getCameraSmoothing,
   registerSessionSettingsPersistHook,
   SESSION_GAMEPAD_DEADZONE_KEY,
   SESSION_GAMEPAD_INVERT_Y_KEY,
@@ -28,6 +30,8 @@ import {
   SESSION_TOUCH_CONTROLS_KEY,
   SESSION_TOUCH_JOYSTICK_DEADZONE_KEY,
   SESSION_TOUCH_LOOK_SENS_KEY,
+  SESSION_AIM_ASSIST_KEY,
+  SESSION_CAMERA_SMOOTHING_KEY,
   type SessionRegistry
 } from '../sessionSettings';
 import { getSaveManager } from './SaveManager';
@@ -48,7 +52,9 @@ function readSettingsFromRegistry(registry: SessionRegistry): PersistedSettings 
     touchLookSensitivity: getTouchLookSensitivity(registry),
     touchButtonScale: getTouchButtonScale(registry),
     touchJoystickDeadzone: getTouchJoystickDeadzone(registry),
-    preferFullscreen: getSaveManager().getSettings().preferFullscreen
+    preferFullscreen: getSaveManager().getSettings().preferFullscreen,
+    aimAssist: getAimAssistLevel(registry),
+    cameraSmoothing: getCameraSmoothing(registry)
   };
 }
 
@@ -67,6 +73,8 @@ function applySettingsToRegistry(registry: SessionRegistry, settings: PersistedS
   registry.set(SESSION_TOUCH_LOOK_SENS_KEY, settings.touchLookSensitivity);
   registry.set(SESSION_TOUCH_BUTTON_SCALE_KEY, settings.touchButtonScale);
   registry.set(SESSION_TOUCH_JOYSTICK_DEADZONE_KEY, settings.touchJoystickDeadzone);
+  registry.set(SESSION_AIM_ASSIST_KEY, settings.aimAssist);
+  registry.set(SESSION_CAMERA_SMOOTHING_KEY, settings.cameraSmoothing);
 }
 
 export function hydrateSessionSettings(registry: SessionRegistry): void {

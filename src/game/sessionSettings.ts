@@ -1,3 +1,6 @@
+import type { AimAssistLevel } from './raycast/RaycastLookFeel';
+import { cycleAimAssistLevel } from './raycast/RaycastLookFeel';
+
 /** Runtime preferences mirrored in Phaser registry; persisted via SaveManager when hooks are bound. */
 
 export const SESSION_MOUSE_SENS_KEY = 'session_mouse_sens';
@@ -14,6 +17,8 @@ export const SESSION_TOUCH_CONTROLS_KEY = 'session_touch_controls';
 export const SESSION_TOUCH_LOOK_SENS_KEY = 'session_touch_look_sens';
 export const SESSION_TOUCH_BUTTON_SCALE_KEY = 'session_touch_button_scale';
 export const SESSION_TOUCH_JOYSTICK_DEADZONE_KEY = 'session_touch_joystick_deadzone';
+export const SESSION_AIM_ASSIST_KEY = 'session_aim_assist';
+export const SESSION_CAMERA_SMOOTHING_KEY = 'session_camera_smoothing';
 
 export interface SessionRegistry {
   get(key: string): unknown;
@@ -34,6 +39,8 @@ const DEFAULT_TOUCH_CONTROLS = true;
 const DEFAULT_TOUCH_LOOK_SENS = 1;
 const DEFAULT_TOUCH_BUTTON_SCALE = 1;
 const DEFAULT_TOUCH_JOYSTICK_DEADZONE = 0.18;
+const DEFAULT_AIM_ASSIST: AimAssistLevel = 'low';
+const DEFAULT_CAMERA_SMOOTHING = 0.2;
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
@@ -54,6 +61,8 @@ export function ensureSessionSettings(registry: SessionRegistry): void {
   if (registry.get(SESSION_TOUCH_LOOK_SENS_KEY) === undefined) registry.set(SESSION_TOUCH_LOOK_SENS_KEY, DEFAULT_TOUCH_LOOK_SENS);
   if (registry.get(SESSION_TOUCH_BUTTON_SCALE_KEY) === undefined) registry.set(SESSION_TOUCH_BUTTON_SCALE_KEY, DEFAULT_TOUCH_BUTTON_SCALE);
   if (registry.get(SESSION_TOUCH_JOYSTICK_DEADZONE_KEY) === undefined) registry.set(SESSION_TOUCH_JOYSTICK_DEADZONE_KEY, DEFAULT_TOUCH_JOYSTICK_DEADZONE);
+  if (registry.get(SESSION_AIM_ASSIST_KEY) === undefined) registry.set(SESSION_AIM_ASSIST_KEY, DEFAULT_AIM_ASSIST);
+  if (registry.get(SESSION_CAMERA_SMOOTHING_KEY) === undefined) registry.set(SESSION_CAMERA_SMOOTHING_KEY, DEFAULT_CAMERA_SMOOTHING);
 }
 
 export function getMouseSensitivity(registry: SessionRegistry): number {
@@ -204,6 +213,34 @@ export function getTouchJoystickDeadzone(registry: SessionRegistry): number {
 
 export function setTouchJoystickDeadzone(registry: SessionRegistry, value: number): void {
   registry.set(SESSION_TOUCH_JOYSTICK_DEADZONE_KEY, clamp(value, 0.05, 0.4));
+  notifySessionSettingsPersist();
+}
+
+export function getAimAssistLevel(registry: SessionRegistry): AimAssistLevel {
+  const v = registry.get(SESSION_AIM_ASSIST_KEY);
+  if (v === 'off' || v === 'low' || v === 'normal') return v;
+  return DEFAULT_AIM_ASSIST;
+}
+
+export function setAimAssistLevel(registry: SessionRegistry, level: AimAssistLevel): void {
+  registry.set(SESSION_AIM_ASSIST_KEY, level);
+  notifySessionSettingsPersist();
+}
+
+export function cycleAimAssistSetting(registry: SessionRegistry, direction: number): AimAssistLevel {
+  const next = cycleAimAssistLevel(getAimAssistLevel(registry), direction);
+  setAimAssistLevel(registry, next);
+  return next;
+}
+
+export function getCameraSmoothing(registry: SessionRegistry): number {
+  const v = Number(registry.get(SESSION_CAMERA_SMOOTHING_KEY));
+  if (!Number.isFinite(v)) return DEFAULT_CAMERA_SMOOTHING;
+  return clamp(v, 0, 0.85);
+}
+
+export function setCameraSmoothing(registry: SessionRegistry, value: number): void {
+  registry.set(SESSION_CAMERA_SMOOTHING_KEY, clamp(value, 0, 0.85));
   notifySessionSettingsPersist();
 }
 
