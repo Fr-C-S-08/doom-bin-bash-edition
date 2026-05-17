@@ -3,7 +3,9 @@ import {
   normalizeRaycastGamepadAxis,
   normalizeRaycastGamepadStick,
   readRaycastGamepadFrame,
-  RaycastGamepadInput
+  RaycastGamepadInput,
+  scanRaycastGamepads,
+  shouldBroadcastRaycastGamepadStatus
 } from '../game/systems/RaycastGamepadInput';
 
 function makeButtons(pressedIndices: number[]): GamepadButton[] {
@@ -94,7 +96,7 @@ describe('raycast gamepad input', () => {
 
     input.update();
     expect(input.isConnected()).toBe(true);
-    expect(input.consumeStatusMessage()).toBe('CONTROL DETECTADO');
+    expect(input.consumeStatusMessage()).toBe('Control detectado');
     expect(input.consumePressed('confirm')).toBe(true);
     expect(input.consumePressed('confirm')).toBe(false);
 
@@ -107,6 +109,45 @@ describe('raycast gamepad input', () => {
 
     input.update();
     expect(input.consumePressed('confirm')).toBe(true);
+  });
+
+  it('detects a connected pad through polling when browser events never fire', () => {
+    const pads: Array<Gamepad | null> = [null, null, null, null];
+    const input = new RaycastGamepadInput({
+      getGamepads: () => pads,
+      getSettings: () => ({
+        leftDeadzone: 0.18,
+        rightDeadzone: 0.18,
+        lookSensitivity: 1,
+        invertLookY: false,
+        vibrationEnabled: false
+      }),
+      enableBrowserEvents: false,
+      getNow: () => 500
+    });
+
+    expect(input.isConnected()).toBe(false);
+    pads[2] = makePad([], [0, 0, 0, 0], 'USB Gamepad');
+    input.update();
+    expect(input.isConnected()).toBe(true);
+    expect(input.getDebugInfo().index).toBe(2);
+    expect(input.consumeStatusMessage()).toBe('Control detectado');
+  });
+
+  it('does not spam repeated gamepad status messages within the cooldown window', () => {
+    expect(shouldBroadcastRaycastGamepadStatus(null, 'connected', 1000, 0)).toBe(true);
+    expect(shouldBroadcastRaycastGamepadStatus('connected', 'connected', 1500, 1000)).toBe(false);
+    expect(shouldBroadcastRaycastGamepadStatus('connected', 'disconnected', 4000, 1000)).toBe(true);
+    expect(shouldBroadcastRaycastGamepadStatus('disconnected', 'activation_hint', 4500, 4000)).toBe(false);
+  });
+
+  it('prefers the previously active gamepad index when still present', () => {
+    const pads: Array<Gamepad | null> = [
+      makePad([], [0, 0, 0, 0], 'Pad A'),
+      makePad([], [0, 0, 0, 0], 'Pad B')
+    ];
+    expect(scanRaycastGamepads(pads, 1)?.pad.id).toBe('Pad B');
+    expect(scanRaycastGamepads(pads, null)?.pad.id).toBe('Pad A');
   });
 
   it('reports disconnected state cleanly when no pads are available', () => {

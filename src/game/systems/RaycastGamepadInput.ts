@@ -2,6 +2,8 @@ import type { MovementVector } from './MovementSystem';
 
 export const RAYCAST_GAMEPAD_DEFAULT_DEADZONE = 0.18;
 export const RAYCAST_GAMEPAD_DEFAULT_LOOK_SENSITIVITY = 1;
+export const RAYCAST_GAMEPAD_ACTIVATION_AXIS_THRESHOLD = 0.08;
+export const RAYCAST_GAMEPAD_STATUS_COOLDOWN_MS = 2200;
 
 export type RaycastGamepadAction =
   | 'confirm'
@@ -45,6 +47,14 @@ export interface RaycastGamepadFrame {
   pressedActions: Set<RaycastGamepadAction>;
 }
 
+export interface RaycastGamepadDebugInfo {
+  detected: boolean;
+  connected: boolean;
+  awaitingActivation: boolean;
+  index: number | null;
+  label: string | null;
+}
+
 export interface RaycastGamepadInputOptions {
   getGamepads?: () => ArrayLike<Gamepad | null>;
   getSettings?: () => RaycastGamepadSettings;
@@ -64,6 +74,8 @@ interface RaycastGamepadLike {
   buttons: readonly RaycastGamepadButtonLike[];
 }
 
+type RaycastGamepadStatusKind = 'connected' | 'disconnected' | 'activation_hint';
+
 const RAYCAST_GAMEPAD_BUTTON_PADS: Record<RaycastGamepadAction, number[]> = {
   confirm: [0],
   cancel: [1],
@@ -81,6 +93,46 @@ const RAYCAST_GAMEPAD_BUTTON_PADS: Record<RaycastGamepadAction, number[]> = {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+export function isRaycastGamepadPresent(pad: Gamepad | null | undefined): pad is Gamepad {
+  if (!pad) return false;
+  return pad.connected !== false;
+}
+
+export function hasRaycastGamepadUserInput(
+  gamepad: RaycastGamepadLike,
+  axisThreshold = RAYCAST_GAMEPAD_ACTIVATION_AXIS_THRESHOLD
+): boolean {
+  for (const button of gamepad.buttons) {
+    if (!button) continue;
+    if (button.pressed || (button.value ?? 0) >= 0.45) return true;
+  }
+  for (const axis of gamepad.axes) {
+    if (Math.abs(axis) > axisThreshold) return true;
+  }
+  return false;
+}
+
+export function scanRaycastGamepads(
+  pads: ArrayLike<Gamepad | null>,
+  preferredIndex: number | null = null
+): { index: number; pad: Gamepad } | null {
+  if (preferredIndex !== null) {
+    const preferred = pads[preferredIndex];
+    if (isRaycastGamepadPresent(preferred)) {
+      return { index: preferredIndex, pad: preferred };
+    }
+  }
+
+  for (let i = 0; i < pads.length; i += 1) {
+    const pad = pads[i];
+    if (isRaycastGamepadPresent(pad)) {
+      return { index: i, pad };
+    }
+  }
+
+  return null;
 }
 
 export function normalizeRaycastGamepadAxis(value: number, deadzone = RAYCAST_GAMEPAD_DEFAULT_DEADZONE): number {
@@ -129,13 +181,11 @@ export function readRaycastGamepadFrame(
     addAction(action, active);
   }
 
-  // Forward-positive movement keeps the stick semantics aligned with WASD: up = forward.
   const move: MovementVector = {
     x: moveAxes.x,
     y: -moveAxes.y
   };
 
-  // Raw look axes — deadzone, curve, and sensitivity are applied in RaycastLookFeel.
   const look: MovementVector = {
     x: lookRawX,
     y: (settings.invertLookY ? 1 : -1) * lookRawY
@@ -151,6 +201,17 @@ export function readRaycastGamepadFrame(
   };
 }
 
+export function shouldBroadcastRaycastGamepadStatus(
+  previous: RaycastGamepadStatusKind | null,
+  next: RaycastGamepadStatusKind,
+  nowMs: number,
+  lastBroadcastAtMs: number
+): boolean {
+  if (previous === next) return false;
+  if (lastBroadcastAtMs <= 0) return true;
+  return nowMs - lastBroadcastAtMs >= RAYCAST_GAMEPAD_STATUS_COOLDOWN_MS;
+}
+
 export class RaycastGamepadInput {
   private readonly getGamepads: () => ArrayLike<Gamepad | null>;
   private readonly getSettings: () => RaycastGamepadSettings;
@@ -158,14 +219,18 @@ export class RaycastGamepadInput {
   private activeIndex: number | null = null;
   private connected = false;
   private activeLabel: string | null = null;
+  private awaitingActivation = false;
   private currentMove: MovementVector = { x: 0, y: 0 };
   private currentLook: MovementVector = { x: 0, y: 0 };
   private heldActions = new Set<RaycastGamepadAction>();
   private pressedActions = new Set<RaycastGamepadAction>();
   private statusMessage: string | null = null;
   private statusMessageUntil = 0;
+  private lastStatusBroadcast: RaycastGamepadStatusKind | null = null;
+  private lastStatusBroadcastAt = 0;
   private browserEventsAttached = false;
   private readonly handleBrowserConnectionChange = (): void => {
+    this.awaitingActivation = true;
     this.rescanActiveGamepad();
   };
 
@@ -197,18 +262,28 @@ export class RaycastGamepadInput {
   update(): RaycastGamepadFrame {
     const gamepad = this.rescanActiveGamepad();
     const settings = this.getSettings();
+    const now = this.getNow();
 
     if (!gamepad) {
+      if (this.connected) {
+        this.broadcastStatus('disconnected', 'Control desconectado', now);
+      }
       this.connected = false;
       this.activeLabel = null;
       this.currentMove = { x: 0, y: 0 };
       this.currentLook = { x: 0, y: 0 };
       this.heldActions.clear();
       this.pressedActions.clear();
+      if (this.awaitingActivation) {
+        this.broadcastStatus('activation_hint', 'Presiona cualquier botón del control para activarlo', now);
+      }
       return this.getFrame();
     }
 
-    if (!this.connected) this.pushStatusMessage('CONTROL DETECTADO');
+    this.awaitingActivation = false;
+    if (!this.connected) {
+      this.broadcastStatus('connected', 'Control detectado', now);
+    }
     this.connected = true;
     this.activeLabel = gamepad.id || null;
 
@@ -237,6 +312,17 @@ export class RaycastGamepadInput {
 
   getLabel(): string | null {
     return this.activeLabel;
+  }
+
+  getDebugInfo(): RaycastGamepadDebugInfo {
+    const scan = scanRaycastGamepads(this.getGamepads(), this.activeIndex);
+    return {
+      detected: scan !== null,
+      connected: this.connected,
+      awaitingActivation: this.awaitingActivation && !this.connected,
+      index: this.connected ? this.activeIndex : scan?.index ?? null,
+      label: this.connected ? this.activeLabel : scan?.pad.id ?? null
+    };
   }
 
   getMoveInput(): MovementVector {
@@ -280,9 +366,14 @@ export class RaycastGamepadInput {
     this.browserEventsAttached = true;
   }
 
-  private pushStatusMessage(message: string): void {
+  private broadcastStatus(kind: RaycastGamepadStatusKind, message: string, nowMs: number): void {
+    if (!shouldBroadcastRaycastGamepadStatus(this.lastStatusBroadcast, kind, nowMs, this.lastStatusBroadcastAt)) {
+      return;
+    }
+    this.lastStatusBroadcast = kind;
+    this.lastStatusBroadcastAt = nowMs;
     this.statusMessage = message;
-    this.statusMessageUntil = this.getNow() + 1800;
+    this.statusMessageUntil = nowMs + 1800;
   }
 
   private getFrame(): RaycastGamepadFrame {
@@ -298,32 +389,23 @@ export class RaycastGamepadInput {
 
   private getCurrentGamepad(): Gamepad | null {
     const pads = this.getGamepads();
-    const index = this.activeIndex;
-    if (index !== null) {
-      const pad = pads[index];
-      if (pad) return pad;
+    if (this.activeIndex !== null) {
+      const pad = pads[this.activeIndex];
+      if (isRaycastGamepadPresent(pad)) return pad;
     }
-    for (let i = 0; i < pads.length; i += 1) {
-      const pad = pads[i];
-      if (pad) return pad;
-    }
-    return null;
+    return scanRaycastGamepads(pads)?.pad ?? null;
   }
 
   private rescanActiveGamepad(): Gamepad | null {
     const pads = this.getGamepads();
-    if (this.activeIndex !== null) {
-      const current = pads[this.activeIndex];
-      if (current) return current;
-      this.activeIndex = null;
-      if (this.connected) this.pushStatusMessage('CONTROL DESCONECTADO');
+    const found = scanRaycastGamepads(pads, this.activeIndex);
+    if (found) {
+      this.activeIndex = found.index;
+      return found.pad;
     }
 
-    for (let i = 0; i < pads.length; i += 1) {
-      const pad = pads[i];
-      if (!pad) continue;
-      this.activeIndex = i;
-      return pad;
+    if (this.activeIndex !== null) {
+      this.activeIndex = null;
     }
 
     return null;

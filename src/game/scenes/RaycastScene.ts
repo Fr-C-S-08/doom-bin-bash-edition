@@ -174,6 +174,17 @@ import {
 } from '../raycast/RaycastEnemyVariants';
 import type { RaycastSetpieceCue } from '../raycast/RaycastSetpiece';
 import {
+  buildRaycastPickupToastLayout,
+  createRaycastPickupToastQueue,
+  getRaycastPickupToastDisplay,
+  mapRaycastHealthPickupToastKind,
+  pruneRaycastPickupToastQueue,
+  pushRaycastPickupToast,
+  RAYCAST_PICKUP_TOAST_FADE_MS,
+  type RaycastPickupToastKind,
+  type RaycastPickupToastQueueState
+} from '../raycast/RaycastPickupToast';
+import {
   buildRaycastHudLayout,
   buildRaycastDebugLine,
   buildRaycastFocusedEnemyLine,
@@ -243,6 +254,8 @@ import {
   RAYCAST_PAUSE_MENU_LABELS
 } from '../raycast/RaycastPauseMenu';
 import {
+  formatRaycastGamepadDebugLine,
+  formatRaycastGamepadStatusLabel,
   resolveRaycastActiveInput,
   type RaycastActiveInputKind,
   type RaycastActiveInputSnapshot
@@ -440,6 +453,9 @@ export class RaycastScene extends Phaser.Scene {
   private feedbackPulse!: Phaser.GameObjects.Rectangle;
   private corruptionVeil!: Phaser.GameObjects.Rectangle;
   private systemText!: Phaser.GameObjects.Text;
+  private pickupToastText!: Phaser.GameObjects.Text;
+  private pickupToastQueue: RaycastPickupToastQueueState = createRaycastPickupToastQueue();
+  private pickupToastLayout = { x: 0, y: 0, maxWidth: 320 };
   private crosshair!: Phaser.GameObjects.Text;
   private hitMarker!: Phaser.GameObjects.Text;
   private finalOverlay!: Phaser.GameObjects.Rectangle;
@@ -679,11 +695,7 @@ export class RaycastScene extends Phaser.Scene {
       return;
     }
     if (this.gamepadInput?.isConnected()) {
-      const move = this.gamepadInput.getMoveInput();
-      const look = this.gamepadInput.getLookInput();
-      if (Math.hypot(move.x, move.y, look.x, look.y) > 0.14) {
-        this.markDetectedActiveInput('gamepad');
-      }
+      this.markDetectedActiveInput('gamepad');
     }
   }
 
@@ -1167,6 +1179,21 @@ export class RaycastScene extends Phaser.Scene {
     this.feedbackPulse.setDepth(11);
     this.corruptionVeil = this.add.rectangle(GAME_WIDTH * 0.5, GAME_HEIGHT * 0.5, GAME_WIDTH, GAME_HEIGHT, RAYCAST_ATMOSPHERE.corruptionTint, 0);
     this.corruptionVeil.setDepth(9);
+    this.pickupToastLayout = buildRaycastPickupToastLayout(GAME_WIDTH, hudLayout);
+    this.pickupToastText = this.add
+      .text(this.pickupToastLayout.x, this.pickupToastLayout.y, '', {
+        fontSize: '12px',
+        fontStyle: '700',
+        color: '#edf7f3',
+        backgroundColor: '#020408b8',
+        padding: { x: 10, y: 5 },
+        align: 'center',
+        wordWrap: { width: this.pickupToastLayout.maxWidth }
+      })
+      .setOrigin(0.5, 0)
+      .setDepth(13)
+      .setAlpha(0)
+      .setVisible(false);
     this.systemText = this.add
       .text(GAME_WIDTH * 0.5, 58, getRaycastIntroMessageForSegment(this.getWorldSegment()), {
         fontSize: '20px',
@@ -1285,6 +1312,7 @@ export class RaycastScene extends Phaser.Scene {
   update(_time: number, delta: number): void {
     this.pollGamepadInput();
     this.pollTouchInput();
+    this.updatePickupToast();
     this.combat?.tick(this.time.now);
     const deltaSeconds = delta / 1000;
     const weapon = this.combat.getCurrentWeapon();
@@ -1543,6 +1571,7 @@ export class RaycastScene extends Phaser.Scene {
     this.collectedSecrets.clear();
     this.collectedHealthPickups.clear();
     this.deferredPickupHints.clear();
+    this.pickupToastQueue = createRaycastPickupToastQueue();
     this.completedEncounterBeats.clear();
     this.enemiesKilled = 0;
     this.runPelletsFired = 0;
@@ -2093,6 +2122,41 @@ export class RaycastScene extends Phaser.Scene {
     });
   }
 
+  private pushPickupToast(kind: RaycastPickupToastKind, amount?: number, label?: string): void {
+    this.pickupToastQueue = pushRaycastPickupToast(this.pickupToastQueue, {
+      kind,
+      nowMs: this.time.now,
+      amount,
+      label
+    });
+  }
+
+  private updatePickupToast(): void {
+    const toast = getRaycastPickupToastDisplay(this.pickupToastQueue, this.time.now);
+    this.pickupToastQueue = pruneRaycastPickupToastQueue(this.pickupToastQueue, this.time.now);
+    if (!toast || this.finalOverlay.visible || this.gamePaused) {
+      this.pickupToastText.setVisible(false).setAlpha(0);
+      return;
+    }
+    const remainingMs = toast.expiresAtMs - this.time.now;
+    const fadeAlpha =
+      remainingMs <= RAYCAST_PICKUP_TOAST_FADE_MS ? Phaser.Math.Clamp(remainingMs / RAYCAST_PICKUP_TOAST_FADE_MS, 0, 1) : 1;
+    this.pickupToastText
+      .setText(toast.text)
+      .setColor(toast.color)
+      .setPosition(this.pickupToastLayout.x, this.pickupToastLayout.y)
+      .setVisible(true)
+      .setAlpha(fadeAlpha * 0.94);
+  }
+
+  private buildGamepadStatusLabel(): string {
+    return formatRaycastGamepadStatusLabel(this.gamepadInput.getDebugInfo());
+  }
+
+  private buildGamepadDebugLine(): string {
+    return formatRaycastGamepadDebugLine(this.gamepadInput.getDebugInfo());
+  }
+
   private switchWeapon(slot: number): void {
     if (!this.canHandleRaycastInput()) return;
     if (!this.playerAlive || this.levelComplete) return;
@@ -2232,7 +2296,8 @@ export class RaycastScene extends Phaser.Scene {
         formatRaycastControlPauseBody(
           {
             activeInput,
-            controlStatus: this.gamepadInput.isConnected() ? 'DETECTADO' : 'SIN CONTROL',
+            controlStatus: this.buildGamepadStatusLabel(),
+            gamepadDebugLine: this.buildGamepadDebugLine(),
             selectionIndex: this.pauseControlSelectionIndex,
             mouseSensitivity: `x${getMouseSensitivity(this.registry).toFixed(2)}`,
             gamepadSensitivity: `x${getGamepadSensitivity(this.registry).toFixed(2)}`,
@@ -2578,7 +2643,7 @@ export class RaycastScene extends Phaser.Scene {
         this.audioFeedback.play('pickupKey', 1, this.time.now);
         this.pulseFeedback(RAYCAST_PALETTE.plasmaBright, 0.09, 140);
         this.cameras.main.shake(55, 0.0014);
-        this.setCombatMessage(`${getRaycastCombatMessageForSegment(this.getWorldSegment(), 'key')}: ${key.pickupObjectiveText}`);
+        this.pushPickupToast('key');
       }
     });
 
@@ -2627,7 +2692,7 @@ export class RaycastScene extends Phaser.Scene {
       this.runScore += this.applyEventScoreGain(secretBoosted);
       this.audioFeedback.play('secret', 1, this.time.now);
       this.pulseFeedback(RAYCAST_PALETTE.plasmaBright, 0.11, 180);
-      this.setCombatMessage(`${getRaycastCombatMessageForSegment(this.getWorldSegment(), 'secret')}: ${secret.objectiveText}`);
+      this.pushPickupToast('secret');
     });
 
     this.currentLevel.healthPickups.forEach((pickup) => {
@@ -2655,7 +2720,7 @@ export class RaycastScene extends Phaser.Scene {
       this.playFeedbackEvent('healthPickup');
       this.pulseFeedback(0xff8fb0, 0.08, 150);
       this.cameras.main.shake(45, 0.001);
-      this.setCombatMessage(`${pickup.pickupMessage} +${result.restored} HP`);
+      this.pushPickupToast(mapRaycastHealthPickupToastKind(pickup.kind), result.restored);
     });
 
     this.currentLevel.exits.forEach((exit) => {

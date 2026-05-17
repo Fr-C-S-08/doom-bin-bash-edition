@@ -6,6 +6,8 @@ import { formatAimAssistLabel } from '../raycast/RaycastLookFeel';
 import {
   formatRaycastActiveInputLine,
   formatRaycastControlsHelpBlock,
+  formatRaycastGamepadDebugLine,
+  formatRaycastGamepadStatusLabel,
   resolveRaycastActiveInput,
   type RaycastActiveInputKind,
   type RaycastActiveInputSnapshot
@@ -251,7 +253,10 @@ export class SettingsScene extends Phaser.Scene {
   update(): void {
     this.gamepadInput.update();
     this.touchInput.update();
+    const gamepadMessage = this.gamepadInput.consumeStatusMessage();
+    if (gamepadMessage) this.refreshBody();
     this.trackSettingsInputActivity();
+    if (this.gamepadInput.isConnected()) this.markDetectedActiveInput('gamepad');
     if (
       this.gamepadInput.consumePressed('navUp') ||
       this.gamepadInput.consumePressed('navDown') ||
@@ -387,7 +392,9 @@ export class SettingsScene extends Phaser.Scene {
     const touchSens = getTouchLookSensitivity(this.registry).toFixed(2);
     const touchButtonScale = getTouchButtonScale(this.registry).toFixed(2);
     const touchDeadzone = getTouchJoystickDeadzone(this.registry).toFixed(2);
-    const controlStatus = this.gamepadInput.isConnected() ? 'DETECTADO' : 'SIN CONTROL';
+    const gamepadDebug = this.gamepadInput.getDebugInfo();
+    const controlStatus = formatRaycastGamepadStatusLabel(gamepadDebug);
+    const gamepadDebugLine = formatRaycastGamepadDebugLine(gamepadDebug);
     const vol = Math.round(getSessionMasterVolume(this.registry) * 100);
     const shake = getScreenshakeEnabled(this.registry) ? 'SÍ' : 'NO';
     const mini = getMinimapDefaultVisible(this.registry) ? 'SÍ' : 'NO';
@@ -399,6 +406,7 @@ export class SettingsScene extends Phaser.Scene {
       rows.push(`${mark} ${line}`);
     };
     label('control', `CONTROL · ${controlStatus}`);
+    rows.push(`  ${gamepadDebugLine}`);
     label('mouse', `RATÓN · sensibilidad ×${sens}`);
     label('pad_sens', `MANDO · sensibilidad ×${padSens}`);
     label('aim_assist', `APUNTADO · asistencia ${aimAssist}`);

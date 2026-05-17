@@ -65,6 +65,7 @@ export type RaycastControlPauseRow = (typeof RAYCAST_CONTROL_PAUSE_ROWS)[number]
 export interface RaycastControlPauseModel {
   activeInput: RaycastActiveInputKind;
   controlStatus: string;
+  gamepadDebugLine?: string;
   selectionIndex: number;
   mouseSensitivity: string;
   gamepadSensitivity: string;
@@ -136,6 +137,7 @@ export function formatRaycastControlPauseBody(model: RaycastControlPauseModel, o
   const L = (s: string) => truncatePauseField(s, w);
   const rows: Array<[string, string]> = [
     ['// CONTROL', `CONTROL · ${model.controlStatus}`],
+    ...(model.gamepadDebugLine ? [['', L(model.gamepadDebugLine)] as [string, string]] : []),
     ['// AJUSTES', L(`RATÓN · sensibilidad ${model.mouseSensitivity}`)],
     ['', L(`MANDO · sensibilidad ${model.gamepadSensitivity}`)],
     ['', L(`MANDO · deadzone izq ${model.leftDeadzone}`)],

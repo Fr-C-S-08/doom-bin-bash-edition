@@ -22,6 +22,7 @@ import {
   getTouchLookSensitivity
 } from '../sessionSettings';
 import { getRaycastBossLevelId, type RaycastBossShortcutSlot } from '../raycast/RaycastBossShortcuts';
+import { buildRaycastGamepadFooterLine } from '../raycast/RaycastInputHelp';
 import { RaycastGamepadInput } from '../systems/RaycastGamepadInput';
 import { RaycastTouchInput } from '../systems/RaycastTouchInput';
 
@@ -280,13 +281,10 @@ export class MenuScene extends Phaser.Scene {
     this.gamepadInput.update();
     this.touchInput.update();
     const touchMessage = this.touchInput.consumeStatusMessage();
-    if (touchMessage) {
-      this.gamepadStatusText.setText(touchMessage);
-      this.gamepadStatusText.setAlpha(0.92);
-    } else {
-      this.gamepadStatusText.setText(this.gamepadInput.isConnected() ? 'CONTROL · DETECTADO' : 'CONTROL · SIN CONTROL');
-      this.gamepadStatusText.setAlpha(this.gamepadInput.isConnected() ? 0.9 : 0.72);
-    }
+    const gamepadMessage = this.gamepadInput.consumeStatusMessage();
+    const statusLine = touchMessage ?? buildRaycastGamepadFooterLine(this.gamepadInput.getDebugInfo(), gamepadMessage);
+    this.gamepadStatusText.setText(statusLine);
+    this.gamepadStatusText.setAlpha(touchMessage || gamepadMessage || this.gamepadInput.isConnected() ? 0.92 : 0.72);
 
     if (this.touchInput.consumePressed('confirm') || this.touchInput.consumePressed('pause')) {
       this.handleMenuConfirm();

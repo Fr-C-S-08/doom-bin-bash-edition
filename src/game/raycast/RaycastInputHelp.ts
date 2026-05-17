@@ -1,3 +1,5 @@
+import type { RaycastGamepadDebugInfo } from '../systems/RaycastGamepadInput';
+
 export type RaycastActiveInputKind = 'keyboard_mouse' | 'gamepad' | 'touch';
 
 export interface RaycastActiveInputSnapshot {
@@ -79,4 +81,32 @@ export function resolveRaycastActiveInput(
 
 export function isRaycastAimAssistInputKind(kind: RaycastActiveInputKind): boolean {
   return kind === 'gamepad' || kind === 'touch';
+}
+
+export function formatRaycastGamepadStatusLabel(debug: RaycastGamepadDebugInfo): string {
+  if (debug.connected) return 'DETECTADO';
+  if (debug.awaitingActivation) return 'PENDIENTE (PULSA UN BOTÓN)';
+  if (debug.detected) return 'DETECTADO (INACTIVO)';
+  return 'SIN CONTROL';
+}
+
+export function formatRaycastGamepadDebugLine(debug: RaycastGamepadDebugInfo): string {
+  if (!debug.detected && !debug.connected && !debug.awaitingActivation) {
+    return 'Mando · no detectado';
+  }
+  const index = debug.index !== null ? `#${debug.index}` : '—';
+  const label = debug.label?.trim() || 'sin nombre';
+  return `Mando · ${label} · índice ${index}`;
+}
+
+export function buildRaycastGamepadFooterLine(
+  debug: RaycastGamepadDebugInfo,
+  transientMessage: string | null = null
+): string {
+  if (transientMessage) return transientMessage;
+  if (debug.awaitingActivation) return 'Presiona cualquier botón del control para activarlo';
+  if (debug.connected) {
+    return `CONTROL · DETECTADO · ${formatRaycastGamepadDebugLine(debug).replace('Mando · ', '')}`;
+  }
+  return `CONTROL · ${formatRaycastGamepadStatusLabel(debug)}`;
 }
