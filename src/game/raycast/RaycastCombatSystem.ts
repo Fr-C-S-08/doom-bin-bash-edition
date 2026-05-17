@@ -9,6 +9,7 @@ import type { ProjectileSpawn, WeaponKind } from '../systems/WeaponTypes';
 import { formatRaycastEnemyTargetLabel } from './RaycastHud';
 import { applyRaycastEnemyKnockback } from './RaycastHitKnockback';
 import { applyEnemyHitFlinch, getDeathFeedbackProfile } from './RaycastCombatFeel';
+import { notifyRaycastEnemyDamaged } from './RaycastEnemySystem';
 import type { EnemyKind } from '../types/game';
 
 export interface RaycastCombatResult {
@@ -196,6 +197,7 @@ export class RaycastCombatSystem {
     if ((target.frontalDamageReduction ?? 0) > 0) target.shieldPulseUntil = time + 180;
     applyRaycastHitStagger(target, projectile.weaponKind, time, false);
     applyEnemyHitFlinch(target, projectile.weaponKind, directCrit);
+    notifyRaycastEnemyDamaged(enemies, target, player.x, player.y, time);
     if (directKilled) {
       const deathFeel = getDeathFeedbackProfile(false);
       target.deathBurstUntil = time + deathFeel.burstDurationMs;
@@ -255,6 +257,7 @@ export class RaycastCombatSystem {
       applyRaycastHitStagger(enemy, projectile.weaponKind, time, true);
       enemy.hitFlashUntil = time + HIT_FLASH_MS + (splashCrit ? CRIT_FLASH_EXTRA_MS : 0);
       applyEnemyHitFlinch(enemy, projectile.weaponKind, splashCrit);
+      notifyRaycastEnemyDamaged(enemies, enemy, originEnemy.x, originEnemy.y, time);
       damage += splashDamage;
     });
 

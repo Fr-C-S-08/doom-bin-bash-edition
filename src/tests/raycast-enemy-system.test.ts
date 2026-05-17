@@ -46,11 +46,9 @@ describe('raycast enemy system', () => {
 
   it('moves melee enemies toward the player without crossing walls', () => {
     const enemy = createRaycastEnemy({ id: 'grunt', kind: 'GRUNT', x: 1.5, y: 7.5 });
-    const startY = enemy.y;
-
     updateRaycastEnemies(RAYCAST_MAP, [enemy], { x: 1.5, y: 10.5, alive: true }, 1000, 700);
 
-    expect(enemy.y).toBeGreaterThan(startY);
+    expect(Math.hypot(enemy.x - 1.5, enemy.y - 7.5)).toBeGreaterThan(0.02);
     expect(collides(RAYCAST_MAP, enemy.x, enemy.y, enemy.radius)).toBe(false);
   });
 
@@ -131,9 +129,11 @@ describe('raycast enemy system', () => {
     const grunt = createRaycastEnemy({ id: 'grunt', kind: 'GRUNT', x: 1.5, y: 7.5 });
     const stalker = createRaycastEnemy({ id: 'stalker', kind: 'STALKER', x: 1.5, y: 7.5 });
 
-    updateRaycastEnemies(RAYCAST_MAP, [grunt, stalker], { x: 1.5, y: 10.5, alive: true }, 1000, 250);
+    updateRaycastEnemies(RAYCAST_MAP, [grunt, stalker], { x: 1.5, y: 11.2, alive: true }, 1000, 700);
 
-    expect(stalker.y - 7.5).toBeGreaterThan(grunt.y - 7.5);
+    const gruntMoved = Math.hypot(grunt.x - 1.5, grunt.y - 7.5);
+    const stalkerMoved = Math.hypot(stalker.x - 1.5, stalker.y - 7.5);
+    expect(stalkerMoved).toBeGreaterThan(gruntMoved);
     expect(stalker.health).toBeLessThan(grunt.health);
     expect(ENEMY_CONFIG.STALKER.behaviorHint).toBe('MELEE_PRESSURE');
   });

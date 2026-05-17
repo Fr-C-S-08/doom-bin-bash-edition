@@ -5,6 +5,12 @@ import { RAYCAST_LEVEL, type RaycastEnemySpawn, type RaycastLevel } from './Rayc
 import { buildRaycastPatrolWaypoints, hashStringToSeed, type PatrolWaypoint } from './RaycastPatrol';
 const GLOBAL_ENEMY_HEALTH_MUL = 1.15;
 
+export interface RaycastPlayerTarget {
+  x: number;
+  y: number;
+  alive: boolean;
+}
+
 export interface RaycastEnemy {
   id: string;
   kind: EnemyKind;
@@ -32,6 +38,13 @@ export interface RaycastEnemy {
   alertUntilTime: number;
   lastKnownPlayerX: number;
   lastKnownPlayerY: number;
+  /** Last game time (ms) the enemy had LOS/hearing on the player. */
+  lastSeenPlayerAt: number;
+  /** Lateral strafe sign (−1 | 1), flipped on a timer. */
+  strafeSign: number;
+  strafeFlipAt: number;
+  /** Combat-move stuck accumulator (ms) for micro reroute. */
+  tacticalStuckMs: number;
   /** Tracks prior tick combat (CHASE / ATTACK / RETREAT) for alert transition. */
   wasCombatActiveLastTick: boolean;
   /** Idle wander heading (radians). */
@@ -84,6 +97,10 @@ export function createRaycastEnemy(spawn: RaycastEnemySpawn): RaycastEnemy {
     alertUntilTime: 0,
     lastKnownPlayerX: homeX,
     lastKnownPlayerY: homeY,
+    lastSeenPlayerAt: 0,
+    strafeSign: hashStringToSeed(spawn.id) % 2 === 0 ? -1 : 1,
+    strafeFlipAt: 0,
+    tacticalStuckMs: 0,
     wasCombatActiveLastTick: false,
     roamHeadingRad: (hashStringToSeed(spawn.id) % 360) * (Math.PI / 180),
     roamNextRedirectAt: 0,

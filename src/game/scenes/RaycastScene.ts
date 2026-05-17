@@ -42,6 +42,7 @@ import {
 } from '../raycast/RaycastEnemy';
 import {
   updateRaycastEnemies,
+  notifyRaycastGunfire,
   updateRaycastEnemyProjectiles,
   type RaycastEnemyProjectile
 } from '../raycast/RaycastEnemySystem';
@@ -1810,6 +1811,8 @@ export class RaycastScene extends Phaser.Scene {
     if (!this.playerAlive || this.levelComplete) return;
     const result = this.combat.fire(this.player, this.enemies, this.map, this.time.now);
     if (!result.fired) return;
+
+    notifyRaycastGunfire(this.enemies, this.player.x, this.player.y, this.time.now);
 
     this.runPelletsFired += result.pelletCount;
     if (this.getLiveBosses().length > 0) {
