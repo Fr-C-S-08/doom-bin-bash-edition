@@ -5,7 +5,12 @@ import {
   raycastTextureExists,
   type RaycastEnemySpriteState,
 } from "./raycastAssetHooks";
-import { castRay, type RaycastHit, type RaycastMap } from "./RaycastMap";
+import {
+  castRay,
+  RAYCAST_TILE,
+  type RaycastHit,
+  type RaycastMap,
+} from "./RaycastMap";
 import {
   getRaycastEnemySpawnTelegraphProgress,
   getRaycastEnemyWindupProgress,
@@ -1498,10 +1503,16 @@ export class RaycastRenderer {
     );
   }
 
-  private getWallTextureKey(
+    private getWallTextureKey(
     hit: RaycastHit,
     surface: ReturnType<typeof sampleRaycastSurfaceContext>,
   ): string | null {
+    if (hit.wallType === RAYCAST_TILE.LOCKED_DOOR) {
+      return surface.variant > 0.5
+        ? RAYCAST_OPTIONAL_TEXTURE_KEYS.door02
+        : RAYCAST_OPTIONAL_TEXTURE_KEYS.door01;
+    }
+
     if (surface.landmark === "gate") {
       return RAYCAST_OPTIONAL_TEXTURE_KEYS.wall02;
     }
