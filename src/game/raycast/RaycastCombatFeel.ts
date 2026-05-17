@@ -3,7 +3,7 @@ import type { RaycastEnemy } from './RaycastEnemy';
 import { RAYCAST_DEATH_BURST_MS, RAYCAST_HIT_FLASH_MS } from './RaycastCombatSystem';
 
 export const RAYCAST_KILL_FREEZE_MS = 42;
-export const RAYCAST_BOSS_KILL_FREEZE_MS = 68;
+export const RAYCAST_BOSS_KILL_FREEZE_MS = 118;
 export const RAYCAST_CORPSE_FADE_MS = 320;
 
 export interface WeaponFeelProfile {
@@ -269,9 +269,9 @@ export function getDeathFeedbackProfile(isBoss: boolean): DeathFeedbackProfile {
   if (isBoss) {
     return {
       freezeMs: RAYCAST_BOSS_KILL_FREEZE_MS,
-      burstScaleMul: 1.55,
-      corpseFadeMs: RAYCAST_CORPSE_FADE_MS + 120,
-      burstDurationMs: RAYCAST_DEATH_BURST_MS + 140
+      burstScaleMul: 1.88,
+      corpseFadeMs: RAYCAST_CORPSE_FADE_MS + 180,
+      burstDurationMs: RAYCAST_DEATH_BURST_MS + 220
     };
   }
   return {

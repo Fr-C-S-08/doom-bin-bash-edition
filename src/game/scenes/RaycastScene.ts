@@ -113,6 +113,13 @@ import {
   type RaycastBossState
 } from '../raycast/RaycastBoss';
 import {
+  BOSS_INTRO_DURATION_MS,
+  getBossIntroCopy,
+  getDesperationPhaseLabel,
+  isBossDesperation,
+  tickDualBossCoordination
+} from '../raycast/RaycastBossAI';
+import {
   createRaycastBossHazardState,
   getRaycastBossHazardMarkers,
   tickRaycastBossHazards,
@@ -438,6 +445,7 @@ export class RaycastScene extends Phaser.Scene {
   private freezeFrameUntil = 0;
   private bossTelegraphById = new Map<string, boolean>();
   private lastBossPhaseById = new Map<string, 1 | 2 | 3>();
+  private bossIntroUntil = 0;
   private lastCombatMessage: string = RAYCAST_ATMOSPHERE.messages.intro;
   private hudCss!: RaycastHudCssBundle;
   private combatMessageUntil = 0;
@@ -1278,7 +1286,8 @@ export class RaycastScene extends Phaser.Scene {
     const moving = Math.hypot(this.player.velocity.x, this.player.velocity.y) > 0.05;
     tickCombatFeelRuntime(this.combatFeelState, this.time.now, deltaSeconds, moving, weapon, reloadBlend);
     const frozen = shouldSkipGameplayDuringFreeze(this.time.now, this.freezeFrameUntil);
-    if (this.playerAlive && !this.levelComplete && !this.gamePaused && !frozen) {
+    const bossIntroActive = this.bossIntroUntil > this.time.now;
+    if (this.playerAlive && !this.levelComplete && !this.gamePaused && !frozen && !bossIntroActive) {
       this.controller.update(delta);
       this.updatePlayerMetrics(delta);
       this.updateLevelState();
@@ -1606,6 +1615,20 @@ export class RaycastScene extends Phaser.Scene {
       const primary = createRaycastBossState(this.currentLevel.bossConfig, this.time.now);
       this.bossStates.push(primary);
       this.lastBossPhaseById.set(primary.id, primary.phase);
+      const behavior = this.currentLevel.bossConfig.behavior ?? 'volt-archon';
+      const intro = getBossIntroCopy(this.currentLevel.bossConfig.displayName, behavior);
+      this.bossIntroUntil = this.time.now + BOSS_INTRO_DURATION_MS;
+      this.setCombatMessage(`${intro.title} // ${intro.subtitle}`, BOSS_INTRO_DURATION_MS);
+      this.audioFeedback.play('bossPhaseShift', 0.72, this.time.now);
+      this.cameras.main.setZoom(1.07);
+      this.tweens.add({
+        targets: this.cameras.main,
+        zoom: 1,
+        duration: BOSS_INTRO_DURATION_MS,
+        ease: 'Cubic.easeOut'
+      });
+    } else {
+      this.bossIntroUntil = 0;
     }
     if (this.currentLevel.id === 'ash-judge-seal') {
       const twin = createRaycastBossState(
@@ -1851,6 +1874,10 @@ export class RaycastScene extends Phaser.Scene {
         if (killed) {
           this.runScore += this.applyEventScoreGain(addRaycastBossClearScore(0));
           this.enemiesKilled += 1;
+          this.cameras.main.shake(280, 0.0042);
+          this.cameras.main.flash(240, 255, 200, 100);
+          this.pulseFeedback(0xff4422, 0.22, 440);
+          this.setCombatMessage(`NÚCLEO DESTRUIDO // ${targetBoss.displayName.toUpperCase()}`, 2800);
           if (this.currentLevel.id === RAYCAST_LEVEL_BOSS.id && this.rewardTier < 1) {
             this.rewardTier = 1;
             this.playerMaxHealth = this.getBasePlayerMaxHealth();
@@ -1865,9 +1892,6 @@ export class RaycastScene extends Phaser.Scene {
             this.setCombatMessage('CORE REWARD: +40% DMG TOTAL  +44 MAX HP', 3600);
           }
           this.audioFeedback.play('episodeComplete', 1, this.time.now);
-          this.pulseFeedback(0xffc36b, 0.16, 260);
-          this.cameras.main.flash(160, 255, 214, 120);
-          this.applyCombatShake(210, 0.003);
           this.gamepadInput?.vibrate('boss');
         }
         const bossImpactAudio = getCombatImpactAudioOptions(result.weaponKind, killed, bossCrit);
@@ -1891,7 +1915,7 @@ export class RaycastScene extends Phaser.Scene {
         this.pulseCrosshair(killed ? '#ff5b6f' : bossCrit ? '#8dffcf' : '#ffffff', killed ? 124 : bossCrit ? 102 : 88);
         this.flashHitMarker(killed, false, bossCrit);
         this.applyCombatShake(killed ? 96 : bossCrit ? 72 : 54, killed ? 0.00225 : bossCrit ? 0.00172 : 0.00132);
-        this.setCombatMessage(killed ? bossHud.coreShattered : bossHud.hullStressed);
+        if (!killed) this.setCombatMessage(bossHud.hullStressed);
         return;
       }
     }
@@ -2352,9 +2376,24 @@ export class RaycastScene extends Phaser.Scene {
   private updateEnemies(delta: number): void {
     const liveBosses = this.getLiveBosses();
     this.trySpawnBossAdds(liveBosses);
+    const bossPlayerCtx = {
+      x: this.player.x,
+      y: this.player.y,
+      alive: this.playerAlive,
+      stationaryMs: this.playerStationaryMs,
+      vx: this.player.velocity.x,
+      vy: this.player.velocity.y
+    };
     for (const boss of liveBosses) {
-      tickRaycastBossMovement(boss, this.map, { x: this.player.x, y: this.player.y, alive: this.playerAlive }, delta, this.time.now);
+      tickRaycastBossMovement(boss, this.map, bossPlayerCtx, delta, this.time.now);
       const bossHud = getRaycastBossHudLines(boss.displayName);
+      if (isBossDesperation(boss) && !boss.desperationAnnounced) {
+        boss.desperationAnnounced = true;
+        this.audioFeedback.play('bossPhaseShift', 1, this.time.now);
+        this.pulseFeedback(0xff3a4a, 0.14, 300);
+        this.cameras.main.shake(150, 0.0022);
+        this.setCombatMessage(getDesperationPhaseLabel(boss.behavior), 2200);
+      }
       const prevPhase = this.lastBossPhaseById.get(boss.id);
       if (prevPhase !== boss.phase) {
         if (boss.phase >= 2) {
@@ -2373,11 +2412,7 @@ export class RaycastScene extends Phaser.Scene {
         this.setCombatMessage(bossHud.telegraphLocked);
       }
       this.bossTelegraphById.set(boss.id, telegraphActive);
-      const bossShots = tickRaycastBossVolleys(
-        boss,
-        { x: this.player.x, y: this.player.y, alive: this.playerAlive, stationaryMs: this.playerStationaryMs },
-        this.time.now
-      );
+      const bossShots = tickRaycastBossVolleys(boss, bossPlayerCtx, this.time.now, this.map);
       if (bossShots.length > 0) {
         this.enemyProjectiles.push(...bossShots);
         this.setCombatMessage(bossHud.volleyInbound);
@@ -2438,33 +2473,7 @@ export class RaycastScene extends Phaser.Scene {
     );
     if (projectileDamage > 0) this.damagePlayer(projectileDamage);
     this.enemyProjectiles = this.enemyProjectiles.filter((projectile) => projectile.alive);
-    this.applyDualBossCoordination();
-    this.applyDualBossSpacing();
-  }
-
-  private applyDualBossCoordination(): void {
-    const live = this.getLiveBosses();
-    if (live.length < 2) return;
-    const a = live[0];
-    const b = live[1];
-    const midX = (a.x + b.x) * 0.5;
-    const midY = (a.y + b.y) * 0.5;
-    const toPlayerX = this.player.x - midX;
-    const toPlayerY = this.player.y - midY;
-    const len = Math.hypot(toPlayerX, toPlayerY) || 1;
-    const nx = toPlayerX / len;
-    const ny = toPlayerY / len;
-    const flankX = -ny;
-    const flankY = nx;
-    const ring = 1.1;
-    const targetAX = this.player.x + flankX * ring;
-    const targetAY = this.player.y + flankY * ring;
-    const targetBX = this.player.x - flankX * ring;
-    const targetBY = this.player.y - flankY * ring;
-    a.x += (targetAX - a.x) * 0.02;
-    a.y += (targetAY - a.y) * 0.02;
-    b.x += (targetBX - b.x) * 0.02;
-    b.y += (targetBY - b.y) * 0.02;
+    tickDualBossCoordination(this.getLiveBosses(), bossPlayerCtx, this.time.now);
   }
 
   private trySpawnBossAdds(liveBosses: RaycastBossState[]): void {
@@ -2491,25 +2500,6 @@ export class RaycastScene extends Phaser.Scene {
       return;
     }
     this.nextBossAddSpawnAt = this.time.now + 1800;
-  }
-
-  private applyDualBossSpacing(): void {
-    const live = this.getLiveBosses();
-    if (live.length < 2) return;
-    const a = live[0];
-    const b = live[1];
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const dist = Math.hypot(dx, dy) || 0.0001;
-    const minDist = a.hitRadius + b.hitRadius + 0.95;
-    if (dist >= minDist) return;
-    const push = (minDist - dist) * 0.5;
-    const nx = dx / dist;
-    const ny = dy / dist;
-    a.x -= nx * push;
-    a.y -= ny * push;
-    b.x += nx * push;
-    b.y += ny * push;
   }
 
   private damagePlayer(amount: number): void {
