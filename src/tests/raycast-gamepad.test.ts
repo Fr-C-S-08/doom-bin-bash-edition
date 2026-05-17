@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isRaycastGamepadPresent,
   normalizeRaycastGamepadAxis,
   normalizeRaycastGamepadStick,
   readRaycastGamepadFrame,
+  resolveRaycastGamepadButtonPads,
   RaycastGamepadInput,
   scanRaycastGamepads,
   shouldBroadcastRaycastGamepadStatus
@@ -16,7 +18,12 @@ function makeButtons(pressedIndices: number[]): GamepadButton[] {
   }));
 }
 
-function makePad(pressedIndices: number[] = [], axes: number[] = [0, 0, 0, 0], id = 'Xbox Controller'): Gamepad {
+function makePad(
+  pressedIndices: number[] = [],
+  axes: number[] = [0, 0, 0, 0],
+  id = 'Xbox Controller',
+  overrides: Partial<Gamepad> = {}
+): Gamepad {
   return {
     id,
     index: 0,
@@ -24,7 +31,8 @@ function makePad(pressedIndices: number[] = [], axes: number[] = [0, 0, 0, 0], i
     mapping: 'standard',
     axes,
     buttons: makeButtons(pressedIndices) as unknown as Gamepad['buttons'],
-    timestamp: 0
+    timestamp: 0,
+    ...overrides
   } as unknown as Gamepad;
 }
 
@@ -148,6 +156,32 @@ describe('raycast gamepad input', () => {
     ];
     expect(scanRaycastGamepads(pads, 1)?.pad.id).toBe('Pad B');
     expect(scanRaycastGamepads(pads, null)?.pad.id).toBe('Pad A');
+  });
+
+  it('accepts 8BitDo and other non-standard pads with empty mapping or connected=false quirks', () => {
+    const pad = makePad([0], [0, -0.6, 0.2, 0], '8BitDo Pro 2', {
+      connected: false,
+      mapping: ''
+    });
+    expect(isRaycastGamepadPresent(pad)).toBe(true);
+    expect(scanRaycastGamepads([pad])?.pad.id).toContain('8BitDo');
+
+    const frame = readRaycastGamepadFrame(pad, {
+      leftDeadzone: 0.18,
+      rightDeadzone: 0.18,
+      lookSensitivity: 1,
+      invertLookY: false,
+      vibrationEnabled: false
+    });
+    expect(frame.heldActions.has('confirm')).toBe(true);
+    expect(frame.move.y).toBeGreaterThan(0);
+  });
+
+  it('uses fallback button mapping when mapping is not standard', () => {
+    const pads = resolveRaycastGamepadButtonPads(makePad([], [], '8BitDo', { mapping: '' }));
+    expect(pads.fire).toEqual(expect.arrayContaining([7, 6]));
+    expect(pads.confirm).toEqual(expect.arrayContaining([0, 1]));
+    expect(pads.pause).toEqual(expect.arrayContaining([9, 4]));
   });
 
   it('reports disconnected state cleanly when no pads are available', () => {

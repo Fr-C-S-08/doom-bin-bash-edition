@@ -2298,6 +2298,7 @@ export class RaycastScene extends Phaser.Scene {
             activeInput,
             controlStatus: this.buildGamepadStatusLabel(),
             gamepadDebugLine: this.buildGamepadDebugLine(),
+            gamepadLiveLine: this.gamepadInput.getDebugInfo().liveInputLine ?? undefined,
             selectionIndex: this.pauseControlSelectionIndex,
             mouseSensitivity: `x${getMouseSensitivity(this.registry).toFixed(2)}`,
             gamepadSensitivity: `x${getGamepadSensitivity(this.registry).toFixed(2)}`,

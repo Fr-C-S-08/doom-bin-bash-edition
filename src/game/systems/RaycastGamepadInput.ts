@@ -4,6 +4,7 @@ export const RAYCAST_GAMEPAD_DEFAULT_DEADZONE = 0.18;
 export const RAYCAST_GAMEPAD_DEFAULT_LOOK_SENSITIVITY = 1;
 export const RAYCAST_GAMEPAD_ACTIVATION_AXIS_THRESHOLD = 0.08;
 export const RAYCAST_GAMEPAD_STATUS_COOLDOWN_MS = 2200;
+export const RAYCAST_GAMEPAD_ANALOG_BUTTON_THRESHOLD = 0.45;
 
 export type RaycastGamepadAction =
   | 'confirm'
@@ -47,12 +48,27 @@ export interface RaycastGamepadFrame {
   pressedActions: Set<RaycastGamepadAction>;
 }
 
+export interface RaycastGamepadProbe {
+  index: number;
+  id: string;
+  mapping: string;
+  connected: boolean;
+  buttonCount: number;
+  axisCount: number;
+  activeButtonIndices: number[];
+  activeAxes: Array<{ index: number; value: number }>;
+}
+
 export interface RaycastGamepadDebugInfo {
   detected: boolean;
   connected: boolean;
   awaitingActivation: boolean;
   index: number | null;
   label: string | null;
+  mapping: string | null;
+  buttonCount: number;
+  axisCount: number;
+  liveInputLine: string | null;
 }
 
 export interface RaycastGamepadInputOptions {
@@ -69,14 +85,22 @@ interface RaycastGamepadButtonLike {
 
 interface RaycastGamepadLike {
   id: string;
+  connected?: boolean;
   mapping?: string;
   axes: readonly number[];
   buttons: readonly RaycastGamepadButtonLike[];
 }
 
+interface RaycastGamepadAxisLayout {
+  moveX: number;
+  moveY: number;
+  lookX: number;
+  lookY: number;
+}
+
 type RaycastGamepadStatusKind = 'connected' | 'disconnected' | 'activation_hint';
 
-const RAYCAST_GAMEPAD_BUTTON_PADS: Record<RaycastGamepadAction, number[]> = {
+const STANDARD_BUTTON_PADS: Record<RaycastGamepadAction, number[]> = {
   confirm: [0],
   cancel: [1],
   pause: [9],
@@ -91,13 +115,37 @@ const RAYCAST_GAMEPAD_BUTTON_PADS: Record<RaycastGamepadAction, number[]> = {
   navRight: [15]
 };
 
+/** Fallback for empty/non-standard mappings (8BitDo, Switch clones, etc.). */
+const FALLBACK_BUTTON_PADS: Record<RaycastGamepadAction, number[]> = {
+  confirm: [0, 1],
+  cancel: [1, 0],
+  pause: [9, 4, 8, 16],
+  toggleMap: [8, 4],
+  reload: [2, 5, 6],
+  fire: [7, 6, 5, 11, 12, 13, 17, 18],
+  nextWeapon: [5, 15, 4],
+  previousWeapon: [4, 14, 5],
+  navUp: [12],
+  navDown: [13],
+  navLeft: [14],
+  navRight: [15]
+};
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+export function hasRaycastGamepadCapabilities(gamepad: RaycastGamepadLike): boolean {
+  return (gamepad.buttons?.length ?? 0) > 0 || (gamepad.axes?.length ?? 0) > 0;
+}
+
 export function isRaycastGamepadPresent(pad: Gamepad | null | undefined): pad is Gamepad {
   if (!pad) return false;
-  return pad.connected !== false;
+  if (!hasRaycastGamepadCapabilities(pad)) return false;
+  if (pad.connected === false) {
+    return Boolean(pad.id?.trim()) || hasRaycastGamepadUserInput(pad);
+  }
+  return true;
 }
 
 export function hasRaycastGamepadUserInput(
@@ -106,7 +154,7 @@ export function hasRaycastGamepadUserInput(
 ): boolean {
   for (const button of gamepad.buttons) {
     if (!button) continue;
-    if (button.pressed || (button.value ?? 0) >= 0.45) return true;
+    if (button.pressed || (button.value ?? 0) >= RAYCAST_GAMEPAD_ANALOG_BUTTON_THRESHOLD) return true;
   }
   for (const axis of gamepad.axes) {
     if (Math.abs(axis) > axisThreshold) return true;
@@ -114,25 +162,101 @@ export function hasRaycastGamepadUserInput(
   return false;
 }
 
+export function scoreRaycastGamepadCandidate(pad: Gamepad, index: number, preferredIndex: number | null): number {
+  let score = 0;
+  if (index === preferredIndex) score += 120;
+  if (pad.connected !== false) score += 60;
+  if (hasRaycastGamepadUserInput(pad)) score += 50;
+  if (pad.mapping === 'standard') score += 25;
+  if (/8bitdo|8-bitdo|ultimate|pro\s*2|xbox|wireless controller/i.test(pad.id)) score += 35;
+  score += Math.min(12, pad.buttons.length);
+  score += Math.min(8, pad.axes.length);
+  return score;
+}
+
 export function scanRaycastGamepads(
   pads: ArrayLike<Gamepad | null>,
   preferredIndex: number | null = null
 ): { index: number; pad: Gamepad } | null {
-  if (preferredIndex !== null) {
-    const preferred = pads[preferredIndex];
-    if (isRaycastGamepadPresent(preferred)) {
-      return { index: preferredIndex, pad: preferred };
-    }
-  }
+  let best: { index: number; pad: Gamepad; score: number } | null = null;
 
   for (let i = 0; i < pads.length; i += 1) {
     const pad = pads[i];
-    if (isRaycastGamepadPresent(pad)) {
-      return { index: i, pad };
+    if (!isRaycastGamepadPresent(pad)) continue;
+    const score = scoreRaycastGamepadCandidate(pad, i, preferredIndex);
+    if (!best || score > best.score) {
+      best = { index: i, pad, score };
     }
   }
 
-  return null;
+  return best ? { index: best.index, pad: best.pad } : null;
+}
+
+export function probeRaycastGamepad(pad: RaycastGamepadLike, index = 0): RaycastGamepadProbe {
+  const activeButtonIndices: number[] = [];
+  pad.buttons.forEach((button, buttonIndex) => {
+    if (!button) return;
+    if (button.pressed || (button.value ?? 0) >= RAYCAST_GAMEPAD_ANALOG_BUTTON_THRESHOLD) {
+      activeButtonIndices.push(buttonIndex);
+    }
+  });
+
+  const activeAxes: Array<{ index: number; value: number }> = [];
+  pad.axes.forEach((value, axisIndex) => {
+    if (Math.abs(value) > RAYCAST_GAMEPAD_ACTIVATION_AXIS_THRESHOLD) {
+      activeAxes.push({ index: axisIndex, value: Number(value.toFixed(2)) });
+    }
+  });
+
+  return {
+    index,
+    id: pad.id || 'sin nombre',
+    mapping: pad.mapping?.trim() || '(vacío)',
+    connected: pad.connected !== false,
+    buttonCount: pad.buttons.length,
+    axisCount: pad.axes.length,
+    activeButtonIndices,
+    activeAxes
+  };
+}
+
+export function formatRaycastGamepadProbeSummary(probe: RaycastGamepadProbe): string {
+  return `Mando · ${probe.id} · #${probe.index} · map ${probe.mapping} · ${probe.buttonCount}b/${probe.axisCount}a`;
+}
+
+export function formatRaycastGamepadLiveInputLine(probe: RaycastGamepadProbe | null): string {
+  if (!probe) return 'Entradas · —';
+  const buttons = probe.activeButtonIndices.length > 0 ? probe.activeButtonIndices.join(',') : '—';
+  const axes =
+    probe.activeAxes.length > 0
+      ? probe.activeAxes.map((axis) => `${axis.index}:${axis.value}`).join(',')
+      : '—';
+  return `Activos · btn ${buttons} · ejes ${axes}`;
+}
+
+export function resolveRaycastGamepadAxisLayout(gamepad: RaycastGamepadLike): RaycastGamepadAxisLayout {
+  const axisCount = gamepad.axes.length;
+  if (gamepad.mapping === 'standard' || axisCount >= 4) {
+    return { moveX: 0, moveY: 1, lookX: 2, lookY: 3 };
+  }
+  if (axisCount >= 2) {
+    return { moveX: 0, moveY: 1, lookX: 0, lookY: 1 };
+  }
+  if (axisCount === 1) {
+    return { moveX: 0, moveY: 0, lookX: 0, lookY: 0 };
+  }
+  return { moveX: 0, moveY: 1, lookX: 2, lookY: 3 };
+}
+
+export function resolveRaycastGamepadButtonPads(gamepad: RaycastGamepadLike): Record<RaycastGamepadAction, number[]> {
+  if (gamepad.mapping === 'standard') return STANDARD_BUTTON_PADS;
+  return FALLBACK_BUTTON_PADS;
+}
+
+function isRaycastGamepadButtonDown(gamepad: RaycastGamepadLike, buttonIndex: number): boolean {
+  const button = gamepad.buttons[buttonIndex];
+  if (!button) return false;
+  return Boolean(button.pressed) || (button.value ?? 0) >= RAYCAST_GAMEPAD_ANALOG_BUTTON_THRESHOLD;
 }
 
 export function normalizeRaycastGamepadAxis(value: number, deadzone = RAYCAST_GAMEPAD_DEFAULT_DEADZONE): number {
@@ -159,26 +283,22 @@ export function readRaycastGamepadFrame(
   gamepad: RaycastGamepadLike,
   settings: RaycastGamepadSettings
 ): RaycastGamepadFrame {
-  const moveAxes = normalizeRaycastGamepadStick(gamepad.axes[0] ?? 0, gamepad.axes[1] ?? 0, settings.leftDeadzone);
-  const lookRawX = gamepad.axes[2] ?? 0;
-  const lookRawY = gamepad.axes[3] ?? 0;
+  const axisLayout = resolveRaycastGamepadAxisLayout(gamepad);
+  const buttonPads = resolveRaycastGamepadButtonPads(gamepad);
+  const moveAxes = normalizeRaycastGamepadStick(
+    gamepad.axes[axisLayout.moveX] ?? 0,
+    gamepad.axes[axisLayout.moveY] ?? 0,
+    settings.leftDeadzone
+  );
+  const lookRawX = gamepad.axes[axisLayout.lookX] ?? 0;
+  const lookRawY = gamepad.axes[axisLayout.lookY] ?? 0;
   const heldActions = new Set<RaycastGamepadAction>();
 
-  const isButtonDown = (buttonIndex: number): boolean => {
-    const button = gamepad.buttons[buttonIndex];
-    if (!button) return false;
-    return Boolean(button.pressed) || (button.value ?? 0) >= 0.5;
-  };
-
-  const addAction = (action: RaycastGamepadAction, active: boolean): void => {
-    if (!active) return;
-    heldActions.add(action);
-  };
-
-  for (const action of Object.keys(RAYCAST_GAMEPAD_BUTTON_PADS) as RaycastGamepadAction[]) {
-    const indices = RAYCAST_GAMEPAD_BUTTON_PADS[action];
-    const active = indices.some((index) => isButtonDown(index));
-    addAction(action, active);
+  for (const action of Object.keys(buttonPads) as RaycastGamepadAction[]) {
+    const indices = buttonPads[action];
+    if (indices.some((index) => isRaycastGamepadButtonDown(gamepad, index))) {
+      heldActions.add(action);
+    }
   }
 
   const move: MovementVector = {
@@ -219,7 +339,9 @@ export class RaycastGamepadInput {
   private activeIndex: number | null = null;
   private connected = false;
   private activeLabel: string | null = null;
+  private activeMapping: string | null = null;
   private awaitingActivation = false;
+  private lastProbe: RaycastGamepadProbe | null = null;
   private currentMove: MovementVector = { x: 0, y: 0 };
   private currentLook: MovementVector = { x: 0, y: 0 };
   private heldActions = new Set<RaycastGamepadAction>();
@@ -265,11 +387,13 @@ export class RaycastGamepadInput {
     const now = this.getNow();
 
     if (!gamepad) {
+      this.lastProbe = null;
       if (this.connected) {
         this.broadcastStatus('disconnected', 'Control desconectado', now);
       }
       this.connected = false;
       this.activeLabel = null;
+      this.activeMapping = null;
       this.currentMove = { x: 0, y: 0 };
       this.currentLook = { x: 0, y: 0 };
       this.heldActions.clear();
@@ -280,12 +404,14 @@ export class RaycastGamepadInput {
       return this.getFrame();
     }
 
+    this.lastProbe = probeRaycastGamepad(gamepad, this.activeIndex ?? 0);
     this.awaitingActivation = false;
     if (!this.connected) {
       this.broadcastStatus('connected', 'Control detectado', now);
     }
     this.connected = true;
     this.activeLabel = gamepad.id || null;
+    this.activeMapping = gamepad.mapping?.trim() || '(vacío)';
 
     const frame = readRaycastGamepadFrame(gamepad, settings);
     const nextPressed = new Set<RaycastGamepadAction>();
@@ -314,14 +440,29 @@ export class RaycastGamepadInput {
     return this.activeLabel;
   }
 
+  getProbe(): RaycastGamepadProbe | null {
+    return this.lastProbe;
+  }
+
   getDebugInfo(): RaycastGamepadDebugInfo {
-    const scan = scanRaycastGamepads(this.getGamepads(), this.activeIndex);
+    const pads = this.getGamepads();
+    const scan = scanRaycastGamepads(pads, this.activeIndex);
+    const probePad = this.connected && this.activeIndex !== null ? pads[this.activeIndex] : scan?.pad ?? null;
+    const probe =
+      probePad && isRaycastGamepadPresent(probePad)
+        ? probeRaycastGamepad(probePad, scan?.index ?? this.activeIndex ?? 0)
+        : this.lastProbe;
+
     return {
       detected: scan !== null,
       connected: this.connected,
       awaitingActivation: this.awaitingActivation && !this.connected,
       index: this.connected ? this.activeIndex : scan?.index ?? null,
-      label: this.connected ? this.activeLabel : scan?.pad.id ?? null
+      label: this.connected ? this.activeLabel : scan?.pad.id ?? null,
+      mapping: this.connected ? this.activeMapping : probe?.mapping ?? null,
+      buttonCount: probe?.buttonCount ?? 0,
+      axisCount: probe?.axisCount ?? 0,
+      liveInputLine: formatRaycastGamepadLiveInputLine(probe)
     };
   }
 

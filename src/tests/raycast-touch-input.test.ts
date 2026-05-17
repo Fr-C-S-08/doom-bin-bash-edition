@@ -143,6 +143,17 @@ describe('raycast touch input', () => {
     expect(centered).toEqual({ x: 0, y: 0 });
   });
 
+  it('keeps moveY for vertical and diagonal joystick drags with screen-up as forward', () => {
+    const up = computeRaycastTouchJoystickVector(100, 100, 100, 40, 80, 0.18);
+    const down = computeRaycastTouchJoystickVector(100, 100, 100, 170, 80, 0.18);
+    const diagonal = computeRaycastTouchJoystickVector(100, 100, 150, 50, 80, 0.18);
+
+    expect(up.y).toBeGreaterThan(0.2);
+    expect(down.y).toBeLessThan(-0.2);
+    expect(diagonal.x).toBeGreaterThan(0.2);
+    expect(diagonal.y).toBeGreaterThan(0.2);
+  });
+
   it('builds a clean gameplay layout and ui layout for tablet use', () => {
     const landscape = buildRaycastTouchLayout(1024, 768, 1);
     const portrait = buildRaycastTouchLayout(768, 1024, 1.15);
@@ -267,9 +278,19 @@ describe('raycast touch input', () => {
 
     harness.processContactDown({ id: 21, x: layout.joystickCenterX, y: layout.joystickCenterY });
     harness.processContactMove({ id: 21, x: layout.joystickCenterX + layout.joystickRadius * 0.5, y: layout.joystickCenterY });
-
     expect(input.getMoveInput().x).toBeGreaterThan(0);
     expect(input.getMoveInput().x).toBeLessThan(1);
+
+    harness.processContactMove({ id: 21, x: layout.joystickCenterX, y: layout.joystickCenterY - layout.joystickRadius * 0.5 });
+    expect(input.getMoveInput().y).toBeGreaterThan(0.2);
+
+    harness.processContactMove({
+      id: 21,
+      x: layout.joystickCenterX + layout.joystickRadius * 0.45,
+      y: layout.joystickCenterY - layout.joystickRadius * 0.45
+    });
+    expect(input.getMoveInput().x).toBeGreaterThan(0.15);
+    expect(input.getMoveInput().y).toBeGreaterThan(0.15);
 
     harness.processContactUp({ id: 21, x: layout.joystickCenterX, y: layout.joystickCenterY });
     expect(input.getMoveInput()).toEqual({ x: 0, y: 0 });

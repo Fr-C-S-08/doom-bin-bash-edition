@@ -81,6 +81,7 @@ export class SettingsScene extends Phaser.Scene {
   private touchInput!: RaycastTouchInput;
   private rowIndex = 1;
   private detectedActiveInputKind: RaycastActiveInputKind = 'keyboard_mouse';
+  private lastGamepadLiveLine: string | null = null;
 
   private readonly handleBack = (): void => {
     this.scene.start('MenuScene');
@@ -254,7 +255,11 @@ export class SettingsScene extends Phaser.Scene {
     this.gamepadInput.update();
     this.touchInput.update();
     const gamepadMessage = this.gamepadInput.consumeStatusMessage();
-    if (gamepadMessage) this.refreshBody();
+    const liveLine = this.gamepadInput.getDebugInfo().liveInputLine;
+    if (gamepadMessage || liveLine !== this.lastGamepadLiveLine) {
+      this.lastGamepadLiveLine = liveLine;
+      this.refreshBody();
+    }
     this.trackSettingsInputActivity();
     if (this.gamepadInput.isConnected()) this.markDetectedActiveInput('gamepad');
     if (
@@ -395,6 +400,7 @@ export class SettingsScene extends Phaser.Scene {
     const gamepadDebug = this.gamepadInput.getDebugInfo();
     const controlStatus = formatRaycastGamepadStatusLabel(gamepadDebug);
     const gamepadDebugLine = formatRaycastGamepadDebugLine(gamepadDebug);
+    const gamepadLiveLine = gamepadDebug.liveInputLine;
     const vol = Math.round(getSessionMasterVolume(this.registry) * 100);
     const shake = getScreenshakeEnabled(this.registry) ? 'SÍ' : 'NO';
     const mini = getMinimapDefaultVisible(this.registry) ? 'SÍ' : 'NO';
@@ -407,6 +413,7 @@ export class SettingsScene extends Phaser.Scene {
     };
     label('control', `CONTROL · ${controlStatus}`);
     rows.push(`  ${gamepadDebugLine}`);
+    if (gamepadLiveLine) rows.push(`  ${gamepadLiveLine}`);
     label('mouse', `RATÓN · sensibilidad ×${sens}`);
     label('pad_sens', `MANDO · sensibilidad ×${padSens}`);
     label('aim_assist', `APUNTADO · asistencia ${aimAssist}`);

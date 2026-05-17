@@ -96,7 +96,9 @@ export function formatRaycastGamepadDebugLine(debug: RaycastGamepadDebugInfo): s
   }
   const index = debug.index !== null ? `#${debug.index}` : '—';
   const label = debug.label?.trim() || 'sin nombre';
-  return `Mando · ${label} · índice ${index}`;
+  const mapping = debug.mapping?.trim() || '—';
+  const counts = `${debug.buttonCount}b/${debug.axisCount}a`;
+  return `Mando · ${label} · idx ${index} · map ${mapping} · ${counts}`;
 }
 
 export function buildRaycastGamepadFooterLine(

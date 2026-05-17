@@ -151,11 +151,13 @@ export function computeRaycastTouchJoystickVector(
   const magnitude = Math.hypot(dx, dy);
   if (magnitude === 0) return { x: 0, y: 0 };
   const clampedMagnitude = Math.min(1, magnitude / safeRadius);
-  const eased = normalizeRaycastTouchAxis(clampedMagnitude, deadzone);
-  if (eased === 0) return { x: 0, y: 0 };
-  const x = clamp((dx / magnitude) * eased, -1, 1);
-  const y = clamp((dy / magnitude) * eased, -1, 1);
-  return { x, y };
+  const nx = dx / magnitude;
+  const ny = dy / magnitude;
+  // Screen Y grows downward; negate so pushing up yields positive forward input.
+  return {
+    x: normalizeRaycastTouchAxis(nx * clampedMagnitude, deadzone),
+    y: normalizeRaycastTouchAxis(-ny * clampedMagnitude, deadzone)
+  };
 }
 
 export function collectRaycastTouchPressedActions(queue: Set<RaycastTouchAction>): Set<RaycastTouchAction> {
@@ -349,25 +351,25 @@ export class RaycastTouchInput {
   private readonly handleDomPointerDown = (event: PointerEvent): void => {
     if (event.pointerType !== 'touch') return;
     const contact = this.getContactPointFromClient(event.pointerId, event.clientX, event.clientY, event);
-    if (this.shouldSkipDuplicateDomContact('down', contact.x, contact.y)) return;
+    if (this.shouldSkipDuplicateDomContact('down', contact.x, contact.y, contact.id)) return;
     this.processContactDown(contact, event);
   };
   private readonly handleDomPointerMove = (event: PointerEvent): void => {
     if (event.pointerType !== 'touch') return;
     const contact = this.getContactPointFromClient(event.pointerId, event.clientX, event.clientY, event);
-    if (this.shouldSkipDuplicateDomContact('move', contact.x, contact.y)) return;
+    if (this.shouldSkipDuplicateDomContact('move', contact.x, contact.y, contact.id)) return;
     this.processContactMove(contact, event);
   };
   private readonly handleDomPointerUp = (event: PointerEvent): void => {
     if (event.pointerType !== 'touch') return;
     const contact = this.getContactPointFromClient(event.pointerId, event.clientX, event.clientY, event);
-    if (this.shouldSkipDuplicateDomContact('up', contact.x, contact.y)) return;
+    if (this.shouldSkipDuplicateDomContact('up', contact.x, contact.y, contact.id)) return;
     this.processContactUp(contact, event);
   };
   private readonly handleDomPointerCancel = (event: PointerEvent): void => {
     if (event.pointerType !== 'touch') return;
     const contact = this.getContactPointFromClient(event.pointerId, event.clientX, event.clientY, event);
-    if (this.shouldSkipDuplicateDomContact('cancel', contact.x, contact.y)) return;
+    if (this.shouldSkipDuplicateDomContact('cancel', contact.x, contact.y, contact.id)) return;
     this.processContactUp(contact, event);
   };
   private readonly handleDomTouchStart = (event: TouchEvent): void => {
@@ -825,7 +827,16 @@ export class RaycastTouchInput {
     if (this.mode === 'gameplay') {
       if (this.isLikelyPalmRestTouch(x, y)) return;
       if (this.isJoystickActivationZone(x, y)) {
-        if (this.countPointers('joystick') >= TOUCH_MAX_JOYSTICK_POINTERS) return;
+        if (this.countPointers('joystick') >= TOUCH_MAX_JOYSTICK_POINTERS) {
+          const existingJoystick = Array.from(this.activePointers.values()).find((pointer) => pointer.kind === 'joystick');
+          if (existingJoystick) {
+            existingJoystick.lastX = x;
+            existingJoystick.lastY = y;
+            this.currentMove = this.computeJoystickVector(this.getSettings().joystickDeadzone);
+            this.updateJoystickThumb();
+          }
+          return;
+        }
         this.activePointers.set(contact.id, {
           kind: 'joystick',
           pointerId: contact.id,
@@ -953,11 +964,23 @@ export class RaycastTouchInput {
 
   private updateJoystickThumb(): void {
     if (!this.joystickThumb || !this.joystickBase) return;
+    const joystick = Array.from(this.activePointers.values()).find((pointer) => pointer.kind === 'joystick');
     const travel = this.layout.joystickRadius * 0.62;
-    this.joystickThumb.setPosition(
-      this.layout.joystickCenterX + this.currentMove.x * travel,
-      this.layout.joystickCenterY + this.currentMove.y * travel
-    );
+    if (joystick) {
+      const dx = joystick.lastX - joystick.originX;
+      const dy = joystick.lastY - joystick.originY;
+      const distance = Math.hypot(dx, dy);
+      const scale = distance > travel && distance > 0 ? travel / distance : 1;
+      this.joystickThumb.setPosition(
+        this.layout.joystickCenterX + dx * scale,
+        this.layout.joystickCenterY + dy * scale
+      );
+    } else {
+      this.joystickThumb.setPosition(
+        this.layout.joystickCenterX + this.currentMove.x * travel,
+        this.layout.joystickCenterY - this.currentMove.y * travel
+      );
+    }
     this.joystickThumb.setAlpha(this.active ? 0.92 : 0.45);
     this.joystickBase.setAlpha(this.active ? 0.55 : 0.3);
   }
@@ -981,10 +1004,13 @@ export class RaycastTouchInput {
     }
 
     const target = this.canvasElement;
-    target.addEventListener('pointerdown', this.handleDomPointerDown, { capture: true, passive: false });
-    target.addEventListener('pointermove', this.handleDomPointerMove, { capture: true, passive: false });
-    target.addEventListener('pointerup', this.handleDomPointerUp, { capture: true, passive: false });
-    target.addEventListener('pointercancel', this.handleDomPointerCancel, { capture: true, passive: false });
+    const useTouchOnly = this.hasTouchCapability();
+    if (!useTouchOnly) {
+      target.addEventListener('pointerdown', this.handleDomPointerDown, { capture: true, passive: false });
+      target.addEventListener('pointermove', this.handleDomPointerMove, { capture: true, passive: false });
+      target.addEventListener('pointerup', this.handleDomPointerUp, { capture: true, passive: false });
+      target.addEventListener('pointercancel', this.handleDomPointerCancel, { capture: true, passive: false });
+    }
     target.addEventListener('touchstart', this.handleDomTouchStart, { capture: true, passive: false });
     target.addEventListener('touchmove', this.handleDomTouchMove, { capture: true, passive: false });
     target.addEventListener('touchend', this.handleDomTouchEnd, { capture: true, passive: false });
@@ -995,10 +1021,12 @@ export class RaycastTouchInput {
   private unbindTouchListeners(): void {
     if (this.canvasElement) {
       const target = this.canvasElement;
-      target.removeEventListener('pointerdown', this.handleDomPointerDown, true);
-      target.removeEventListener('pointermove', this.handleDomPointerMove, true);
-      target.removeEventListener('pointerup', this.handleDomPointerUp, true);
-      target.removeEventListener('pointercancel', this.handleDomPointerCancel, true);
+      if (!this.hasTouchCapability()) {
+        target.removeEventListener('pointerdown', this.handleDomPointerDown, true);
+        target.removeEventListener('pointermove', this.handleDomPointerMove, true);
+        target.removeEventListener('pointerup', this.handleDomPointerUp, true);
+        target.removeEventListener('pointercancel', this.handleDomPointerCancel, true);
+      }
       target.removeEventListener('touchstart', this.handleDomTouchStart, true);
       target.removeEventListener('touchmove', this.handleDomTouchMove, true);
       target.removeEventListener('touchend', this.handleDomTouchEnd, true);
@@ -1042,7 +1070,7 @@ export class RaycastTouchInput {
       phase === 'start' ? 'down' : phase === 'end' ? 'up' : phase;
     for (const touch of touches) {
       const contact = this.getContactPointFromClient(touch.identifier, touch.clientX, touch.clientY, event);
-      if (this.shouldSkipDuplicateDomContact(signaturePhase, contact.x, contact.y)) continue;
+      if (this.shouldSkipDuplicateDomContact(signaturePhase, contact.x, contact.y, contact.id)) continue;
       if (phase === 'start') this.processContactDown(contact, event);
       else if (phase === 'move') this.processContactMove(contact, event);
       else this.processContactUp(contact, event);
@@ -1058,8 +1086,16 @@ export class RaycastTouchInput {
     }
   }
 
-  private shouldSkipDuplicateDomContact(phase: 'down' | 'move' | 'up' | 'cancel', x: number, y: number): boolean {
-    const signature = `${phase}:${Math.round(x / 4)}:${Math.round(y / 4)}`;
+  private shouldSkipDuplicateDomContact(
+    phase: 'down' | 'move' | 'up' | 'cancel',
+    x: number,
+    y: number,
+    pointerId?: number
+  ): boolean {
+    if (phase === 'move' && pointerId !== undefined && this.activePointers.has(pointerId)) {
+      return false;
+    }
+    const signature = `${phase}:${pointerId ?? 'na'}:${Math.round(x / 4)}:${Math.round(y / 4)}`;
     const now = this.getNow();
     if (this.lastDomContactSignature === signature && now - this.lastDomContactAt < 48) {
       return true;
