@@ -451,10 +451,10 @@ export class ArenaScene extends Phaser.Scene {
       elapsedTime: time,
       totalKills: this.enemiesKilled,
       enemiesAlive: this.countEnemiesAlive() + this.pendingSpawns,
-      p1Health: this.p1.health,
-      p2Health: this.p2.health,
-      p1Alive: this.p1.alive,
-      p2Alive: this.p2.alive,
+      players: [
+        { health: this.p1.health, alive: this.p1.alive },
+        { health: this.p2.health, alive: this.p2.alive }
+      ],
       currentWave: this.currentWave,
       timeSincePlayerDamagedMs: Math.max(0, time - this.lastPlayerDamageAt),
       playerStationaryMs: this.playerStationaryMs,
