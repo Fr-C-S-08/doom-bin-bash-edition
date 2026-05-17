@@ -1,23 +1,30 @@
 import type { PlayerState, EnemyState } from '../../shared/types.js';
-import type { SnapshotMessage } from '../../shared/protocol.js';
-import { tickEnemies } from './EnemySystem.js';
+import type { SnapshotMessage, ServerEvent } from '../../shared/protocol.js';
+import { tickEnemies, findTargetPlayer } from './EnemySystem.js';
 import { DirectorSystem } from './DirectorSystem.js';
-import { createRaycastEnemy, type RaycastEnemy } from '../../src/game/raycast/RaycastEnemy.js';
+import { cloneRaycastEnemies, createRaycastEnemy, type RaycastEnemy } from '../../src/game/raycast/RaycastEnemy.js';
 import { RAYCAST_LEVEL } from '../../src/game/raycast/RaycastLevel.js';
 import type { RaycastMap } from '../../src/game/raycast/RaycastMap.js';
 import type { SpawnRequest } from '../../src/game/systems/GameDirector.js';
+import { findEnemyInCrosshair } from '../../src/game/raycast/RaycastCombatSystem.js';
+import { castRay } from '../../src/game/raycast/RaycastMap.js';
+import { applyDamage } from '../../src/game/systems/CombatSystem.js';
+import { WEAPON_ORDER, getWeaponConfig } from '../../src/game/systems/WeaponConfig.js';
+import { RESPAWN_COOLDOWN_MS, TICK_INTERVAL_MS } from '../../shared/constants.js';
 
 export class ServerWorld {
   private readonly playerStates = new Map<string, PlayerState>();
-  private readonly enemies: RaycastEnemy[] = [];
+  private readonly enemies: RaycastEnemy[] = cloneRaycastEnemies(RAYCAST_LEVEL);
   private readonly map: RaycastMap = RAYCAST_LEVEL.map;
   private readonly director = new DirectorSystem(
     RAYCAST_LEVEL.director.config,
     RAYCAST_LEVEL.director.spawnPoints
   );
   private serverTime = 0;
+  private currentTick = 0;
   private totalKills = 0;
-  private targetPlayerId: string | null = null;
+  private gameOverFired = false;
+  private readonly pendingEvents: ServerEvent[] = [];
 
   addPlayer(id: string, name: string): void {
     this.playerStates.set(id, {
@@ -31,15 +38,10 @@ export class ServerWorld {
       weapon: 1,
       alive: true
     });
-    // First player becomes the initial melee target
-    if (!this.targetPlayerId) this.targetPlayerId = id;
   }
 
   removePlayer(id: string): void {
     this.playerStates.delete(id);
-    if (this.targetPlayerId === id) {
-      this.targetPlayerId = this.playerStates.keys().next().value ?? null;
-    }
   }
 
   updatePlayerInput(id: string, input: { x: number; y: number; yaw: number; seq: number }): void {
@@ -50,9 +52,54 @@ export class ServerWorld {
     player.yaw = input.yaw;
   }
 
+  handleShoot(playerId: string, x: number, y: number, yaw: number, weaponSlot: number): void {
+    const player = this.playerStates.get(playerId);
+    if (!player?.alive) return;
+
+    if (weaponSlot < 1 || weaponSlot > WEAPON_ORDER.length) {
+      console.warn(`[server] shoot from playerId=${playerId} invalid weapon=${weaponSlot}`);
+      return;
+    }
+
+    const kindIndex = Math.max(0, Math.min(weaponSlot - 1, WEAPON_ORDER.length - 1));
+    const weaponKind = WEAPON_ORDER[kindIndex];
+    const config = getWeaponConfig(weaponKind, 'raycast');
+
+    // Get wall distance for hitscan range check
+    const hit = castRay(this.map, x, y, yaw, yaw);
+    const wallDistance = hit.distance;
+
+    // Find enemy in crosshair using server position
+    const fakePlayer = { x, y, angle: yaw };
+    const enemy = findEnemyInCrosshair(
+      fakePlayer,
+      this.enemies.filter((e) => e.alive),
+      wallDistance,
+      config.aimToleranceRadians
+    );
+
+    if (enemy) {
+      applyDamage(enemy, config.damage);
+    }
+  }
+
   tick(deltaMs: number): void {
     this.serverTime += deltaMs;
+    this.currentTick += 1;
     const players = Array.from(this.playerStates.values());
+
+    // 0. Check for auto-respawn
+    const respawnTicks = Math.ceil(RESPAWN_COOLDOWN_MS / TICK_INTERVAL_MS);
+    for (const p of players) {
+      if (!p.alive && p.respawnAtTick !== undefined && this.currentTick >= p.respawnAtTick) {
+        p.hp = p.maxHp;
+        p.alive = true;
+        p.x = RAYCAST_LEVEL.playerStart.x;
+        p.y = RAYCAST_LEVEL.playerStart.y;
+        p.yaw = RAYCAST_LEVEL.playerStart.angle;
+        p.respawnAtTick = undefined;
+      }
+    }
 
     // 1. Run enemy AI — track kills
     const aliveBeforeTick = this.enemies.filter((e) => e.alive).length;
@@ -60,12 +107,15 @@ export class ServerWorld {
     const aliveAfterTick = this.enemies.filter((e) => e.alive).length;
     this.totalKills += Math.max(0, aliveBeforeTick - aliveAfterTick);
 
-    // 2. Apply melee damage to the target player
+    // 2. Apply melee damage to the nearest alive player
     if (result.meleeDamage > 0) {
-      const target = this.targetPlayerId ? this.playerStates.get(this.targetPlayerId) : null;
-      if (target?.alive) {
+      const target = findTargetPlayer(this.enemies, players);
+      if (target) {
         target.hp = Math.max(0, target.hp - result.meleeDamage);
-        if (target.hp <= 0) target.alive = false;
+        if (target.hp <= 0) {
+          target.alive = false;
+          target.respawnAtTick = this.currentTick + respawnTicks;
+        }
       }
     }
 
@@ -80,6 +130,20 @@ export class ServerWorld {
 
     if (decision.spawn) this.spawnEnemy(decision.spawn);
     for (const extra of decision.extraSpawns) this.spawnEnemy(extra);
+
+    // 4. Check for game over (all players dead, no pending respawn)
+    if (!this.gameOverFired && this.playerStates.size > 0) {
+      const allDead = players.every((p) => !p.alive);
+      if (allDead) {
+        this.gameOverFired = true;
+        this.pendingEvents.push({ type: 'event', kind: 'gameOver' });
+      }
+    }
+  }
+
+  /** Returns and clears any events accumulated during the last tick. */
+  drainEvents(): ServerEvent[] {
+    return this.pendingEvents.splice(0);
   }
 
   getSnapshot(tick: number): SnapshotMessage {

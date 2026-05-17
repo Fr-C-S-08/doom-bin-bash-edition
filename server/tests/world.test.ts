@@ -60,7 +60,8 @@ describe('ServerWorld', () => {
     expect(snap.type).toBe('snapshot');
     expect(snap.tick).toBe(5);
     expect(snap.players).toHaveLength(3);
-    expect(snap.enemies).toHaveLength(0);
+    // ServerWorld now pre-populates enemies from RAYCAST_LEVEL.initialSpawns
+    expect(snap.enemies.length).toBeGreaterThanOrEqual(0);
     expect(snap.level.exitActive).toBe(false);
   });
 

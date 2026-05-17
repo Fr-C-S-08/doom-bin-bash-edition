@@ -34,6 +34,16 @@ export function createServer(port: number): GameServer {
         ws.send(payload);
       }
     });
+    // Broadcast any server events (e.g. gameOver)
+    const events = world.drainEvents();
+    for (const ev of events) {
+      const evPayload = JSON.stringify(ev);
+      wss.clients.forEach((ws) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(evPayload);
+        }
+      });
+    }
   }, TICK_INTERVAL_MS);
 
   wss.on('connection', (ws) => {
@@ -75,6 +85,11 @@ export function createServer(port: number): GameServer {
 
       if (msg.type === 'input') {
         world.updatePlayerInput(playerId, { x: msg.x, y: msg.y, yaw: msg.yaw, seq: msg.seq });
+        return;
+      }
+
+      if (msg.type === 'shoot') {
+        world.handleShoot(playerId, msg.x, msg.y, msg.yaw, msg.weapon);
         return;
       }
     });

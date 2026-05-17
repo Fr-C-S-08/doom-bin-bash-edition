@@ -227,6 +227,7 @@ import { NetState } from '../net/NetState';
 import type { SnapshotMessage } from '../../../shared/protocol';
 import type { EnemyState } from '../../../shared/types';
 import { TICK_INTERVAL_MS } from '../../../shared/constants';
+import { WEAPON_ORDER } from '../systems/WeaponConfig';
 
 interface RaycastSceneData {
   levelId?: string;
@@ -438,6 +439,14 @@ export class RaycastScene extends Phaser.Scene {
   private readonly handleRetry = (): void => {
     if (!this.isRaycastSceneActive()) return;
     if (this.gamePaused) return;
+    // In coop, server controls respawn — R key should only reload
+    if (this.netConnected) {
+      if (this.playerAlive) {
+        const started = this.combat.tryReload(this.time.now);
+        if (started) this.setCombatMessage('RECARGANDO...');
+      }
+      return;
+    }
     if (this.playerAlive && !this.levelComplete) {
       const started = this.combat.tryReload(this.time.now);
       if (started) this.setCombatMessage('RECARGANDO...');
@@ -692,7 +701,29 @@ export class RaycastScene extends Phaser.Scene {
           const local = this.netState.getLocalPlayer();
           if (local) {
             this.playerHealth = local.hp;
-            if (local.hp <= 0) this.playerAlive = false;
+            if (!local.alive) {
+              this.playerAlive = false;
+            } else if (!this.playerAlive && local.alive) {
+              // Server respawned us
+              this.playerAlive = true;
+              this.playerHealth = local.hp;
+              this.player.x = local.x;
+              this.player.y = local.y;
+              this.player.angle = local.yaw;
+            }
+          }
+        });
+        this.netClient.on<{ type: 'event'; kind: string }>('event', (ev) => {
+          if (ev.kind === 'gameOver') {
+            this.playerAlive = false;
+            if (!this.finalOverlay) {
+              console.warn('[net] gameOver received but UI not ready');
+              return;
+            }
+            this.finalOverlay.setVisible(true).setAlpha(0.9);
+            this.finalTitleText?.setText('GAME OVER').setColor('#cc2222').setVisible(true);
+            this.finalSummaryText?.setText('Todos los jugadores han caído.').setVisible(true);
+            this.finalHintText?.setText('ESC → MENÚ').setVisible(true);
           }
         });
         this.netConnected = true;
@@ -1537,8 +1568,36 @@ export class RaycastScene extends Phaser.Scene {
   private fireWeapon(): void {
     if (!this.canHandleRaycastInput()) return;
     if (!this.playerAlive || this.levelComplete) return;
+    // In coop the server is authoritative for enemy HP. Snapshot health/alive before
+    // firing so we can restore them after — this lets combat.fire() compute full
+    // visual/audio feedback (hit markers, kill sounds) without actually mutating state.
+    type EnemySnapshot = { health: number; alive: boolean };
+    const enemySnapshots: EnemySnapshot[] | null = this.netConnected
+      ? this.enemies.map((e) => ({ health: e.health, alive: e.alive }))
+      : null;
+
     const result = this.combat.fire(this.player, this.enemies, this.map, this.time.now);
+
+    if (enemySnapshots) {
+      for (let i = 0; i < this.enemies.length; i++) {
+        const snap = enemySnapshots[i];
+        if (snap) {
+          this.enemies[i].health = snap.health;
+          this.enemies[i].alive = snap.alive;
+        }
+      }
+    }
+
     if (!result.fired) return;
+
+    if (this.netConnected && this.netClient) {
+      const weaponSlot = WEAPON_ORDER.indexOf(result.weaponKind) + 1;
+      if (weaponSlot === 0) {
+        console.warn('[net] unknown weaponKind:', result.weaponKind);
+      } else {
+        this.netClient.send({ type: 'shoot', x: this.player.x, y: this.player.y, yaw: this.player.angle, weapon: weaponSlot });
+      }
+    }
 
     this.runPelletsFired += result.pelletCount;
     if (this.getLiveBosses().length > 0) {
