@@ -10,13 +10,23 @@ export type RaycastGamepadAction =
   | 'toggleMap'
   | 'reload'
   | 'fire'
-  | 'altFire'
   | 'nextWeapon'
   | 'previousWeapon'
   | 'navUp'
   | 'navDown'
   | 'navLeft'
   | 'navRight';
+
+export const RAYCAST_GAMEPAD_COMBAT_ACTIONS = [
+  'reload',
+  'fire',
+  'nextWeapon',
+  'previousWeapon'
+] as const satisfies readonly RaycastGamepadAction[];
+
+export function shouldAllowRaycastCombatGamepadInput(gamePaused: boolean): boolean {
+  return !gamePaused;
+}
 
 export interface RaycastGamepadSettings {
   leftDeadzone: number;
@@ -61,7 +71,6 @@ const RAYCAST_GAMEPAD_BUTTON_PADS: Record<RaycastGamepadAction, number[]> = {
   toggleMap: [8],
   reload: [2],
   fire: [7],
-  altFire: [6],
   nextWeapon: [5, 15],
   previousWeapon: [4, 14],
   navUp: [12],

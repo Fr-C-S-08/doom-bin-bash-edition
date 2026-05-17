@@ -78,7 +78,7 @@ export class MenuScene extends Phaser.Scene {
   };
 
   private readonly handleMenuSelectionUp = (): void => {
-    this.menuSelectionIndex = (this.menuSelectionIndex + 1) % 2;
+    this.menuSelectionIndex = (this.menuSelectionIndex + 2 - 1) % 2;
     this.refreshMenuSelectionVisuals();
   };
 
@@ -276,16 +276,17 @@ export class MenuScene extends Phaser.Scene {
     if (this.touchInput.consumePressed('cancel')) {
       this.handleMenuCancel();
     }
-    if (
-      this.gamepadInput.consumePressed('navUp') ||
-      this.gamepadInput.consumePressed('navDown') ||
-      this.touchInput.consumePressed('navUp') ||
-      this.touchInput.consumePressed('navDown') ||
-      this.touchInput.consumePressed('navLeft') ||
-      this.touchInput.consumePressed('navRight')
-    ) {
-      this.menuSelectionIndex = (this.menuSelectionIndex + 1) % 2;
-      this.refreshMenuSelectionVisuals();
+    if (this.gamepadInput.consumePressed('navUp') || this.touchInput.consumePressed('navUp')) {
+      this.handleMenuSelectionUp();
+    }
+    if (this.gamepadInput.consumePressed('navDown') || this.touchInput.consumePressed('navDown')) {
+      this.handleMenuSelectionDown();
+    }
+    if (this.touchInput.consumePressed('navLeft')) {
+      this.handleMenuSelectionUp();
+    }
+    if (this.touchInput.consumePressed('navRight')) {
+      this.handleMenuSelectionDown();
     }
     if (this.gamepadInput.consumePressed('confirm') || this.gamepadInput.consumePressed('pause')) {
       this.handleMenuConfirm();

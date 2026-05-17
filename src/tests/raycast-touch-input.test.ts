@@ -3,9 +3,11 @@ import {
   buildRaycastTouchButtonSpecs,
   buildRaycastTouchLayout,
   clampRaycastTouchLookDelta,
+  clearRaycastTouchTransientState,
   isRaycastTouchPortrait,
   normalizeRaycastTouchAxis,
   normalizeRaycastTouchStick,
+  shouldRaycastTouchCaptureBackgroundPointer,
   shouldShowRaycastTouchControls
 } from '../game/systems/RaycastTouchInput';
 
@@ -49,6 +51,23 @@ describe('raycast touch input', () => {
     expect(ui.some((button) => button.action === 'confirm')).toBe(true);
     expect(ui.some((button) => button.action === 'cancel')).toBe(true);
     expect(ui.some((button) => button.action === 'navUp')).toBe(true);
+  });
+
+  it('exposes ui mode without background capture so menu taps are not swallowed', () => {
+    expect(shouldRaycastTouchCaptureBackgroundPointer('ui', false)).toBe(false);
+    expect(buildRaycastTouchButtonSpecs(buildRaycastTouchLayout(1024, 768, 1), 'ui').length).toBeGreaterThan(0);
+  });
+
+  it('clears stuck move/fire state via transient reset helper', () => {
+    const held = new Set(['fire' as const]);
+    clearRaycastTouchTransientState({
+      activePointers: new Map(),
+      currentMove: { x: 1, y: 1 },
+      currentLook: { x: 0.5, y: 0 },
+      heldActions: held,
+      pressedActions: new Set(['reload' as const])
+    });
+    expect(held.size).toBe(0);
   });
 
   it('only shows touch controls on touch-capable viewports when enabled', () => {

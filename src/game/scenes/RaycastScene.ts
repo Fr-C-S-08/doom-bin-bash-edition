@@ -1311,20 +1311,22 @@ export class RaycastScene extends Phaser.Scene {
       }
     }
 
-    if (this.gamepadInput.consumePressed('reload')) {
-      this.handleRetry();
-    }
+    if (!this.gamePaused) {
+      if (this.gamepadInput.consumePressed('reload')) {
+        this.handleRetry();
+      }
 
-    if (this.gamepadInput.consumePressed('fire')) {
-      this.handleFireInput();
-    }
+      if (this.gamepadInput.consumePressed('fire')) {
+        this.handleFireInput();
+      }
 
-    if (this.gamepadInput.consumePressed('nextWeapon')) {
-      this.cycleWeapon(1);
-    }
+      if (this.gamepadInput.consumePressed('nextWeapon')) {
+        this.cycleWeapon(1);
+      }
 
-    if (this.gamepadInput.consumePressed('previousWeapon')) {
-      this.cycleWeapon(-1);
+      if (this.gamepadInput.consumePressed('previousWeapon')) {
+        this.cycleWeapon(-1);
+      }
     }
 
     if (this.gamepadInput.consumePressed('navUp')) {
@@ -1373,13 +1375,15 @@ export class RaycastScene extends Phaser.Scene {
       }
     }
 
-    if (this.touchInput.consumePressed('reload')) this.handleRetry();
-    if (this.touchInput.consumePressed('fire')) this.handleFireInput();
-    if (this.touchInput.consumePressed('weapon1')) this.handleWeaponSlotOne();
-    if (this.touchInput.consumePressed('weapon2')) this.handleWeaponSlotTwo();
-    if (this.touchInput.consumePressed('weapon3')) this.handleWeaponSlotThree();
-    if (this.touchInput.consumePressed('nextWeapon')) this.cycleWeapon(1);
-    if (this.touchInput.consumePressed('previousWeapon')) this.cycleWeapon(-1);
+    if (!this.gamePaused) {
+      if (this.touchInput.consumePressed('reload')) this.handleRetry();
+      if (this.touchInput.consumePressed('fire')) this.handleFireInput();
+      if (this.touchInput.consumePressed('weapon1')) this.handleWeaponSlotOne();
+      if (this.touchInput.consumePressed('weapon2')) this.handleWeaponSlotTwo();
+      if (this.touchInput.consumePressed('weapon3')) this.handleWeaponSlotThree();
+      if (this.touchInput.consumePressed('nextWeapon')) this.cycleWeapon(1);
+      if (this.touchInput.consumePressed('previousWeapon')) this.cycleWeapon(-1);
+    }
     if (this.touchInput.consumePressed('navUp')) this.handlePauseMenuUp();
     if (this.touchInput.consumePressed('navDown')) this.handlePauseMenuDown();
     if (this.touchInput.consumePressed('navLeft')) this.handlePauseMenuLeft();
@@ -1922,6 +1926,7 @@ export class RaycastScene extends Phaser.Scene {
   }
 
   private cycleWeapon(direction: number): void {
+    if (this.gamePaused) return;
     if (!this.canHandleRaycastInput()) return;
     if (!this.playerAlive || this.levelComplete) return;
     const current = this.combat.getCurrentWeapon();
@@ -1997,6 +2002,7 @@ export class RaycastScene extends Phaser.Scene {
     this.gamePaused = true;
     this.pauseSelectionIndex = 0;
     this.pausePanelMode = 'main';
+    this.touchInput?.resetActiveContactState();
     this.touchInput?.setMode('ui');
     this.pauseDim.setVisible(true);
     this.pausePanel.setVisible(true);
@@ -2012,6 +2018,7 @@ export class RaycastScene extends Phaser.Scene {
     this.gamePaused = false;
     this.pausePanelMode = 'main';
     this.pauseControlSelectionIndex = 1;
+    this.touchInput?.resetActiveContactState();
     this.touchInput?.setMode('gameplay');
     this.pauseDim.setVisible(false);
     this.pausePanel.setVisible(false);

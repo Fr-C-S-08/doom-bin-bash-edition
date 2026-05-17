@@ -217,6 +217,41 @@ function isRaycastTouchTextObject(gameObject: Phaser.GameObjects.GameObject): ga
   );
 }
 
+export interface RaycastTouchTransientState {
+  activePointers: Map<number, TouchPointerState>;
+  currentMove: MovementVector;
+  currentLook: MovementVector;
+  heldActions: Set<RaycastTouchAction>;
+  pressedActions: Set<RaycastTouchAction>;
+  buttons?: Iterable<Pick<TouchButtonState, 'pressed' | 'pointerId'>>;
+}
+
+/** Clears sticks, pointers, held/pressed actions — safe on pause, blur, or overlay rebuild. */
+export function clearRaycastTouchTransientState(state: RaycastTouchTransientState): void {
+  state.activePointers.clear();
+  state.currentMove = { x: 0, y: 0 };
+  state.currentLook = { x: 0, y: 0 };
+  state.heldActions.clear();
+  state.pressedActions.clear();
+  if (state.buttons) {
+    for (const button of state.buttons) {
+      button.pressed = false;
+      button.pointerId = null;
+    }
+  }
+}
+
+/** UI/menu mode must not swallow taps outside overlay buttons (Phaser interactives below). */
+export function shouldRaycastTouchPreventDefault(mode: RaycastTouchMode, capturedOverlayGesture: boolean): boolean {
+  if (!capturedOverlayGesture) return false;
+  return mode === 'gameplay';
+}
+
+export function shouldRaycastTouchCaptureBackgroundPointer(mode: RaycastTouchMode, hitOverlayButton: boolean): boolean {
+  if (hitOverlayButton) return true;
+  return mode === 'gameplay';
+}
+
 export class RaycastTouchInput {
   private readonly scene: Phaser.Scene;
   private readonly getSettings: () => RaycastTouchSettings;
@@ -251,9 +286,25 @@ export class RaycastTouchInput {
     this.processPointerUp(pointer);
   };
   private readonly handleWindowBlur = (): void => {
-    this.suppressLookInput(2);
+    this.resetActiveContactState();
   };
   private readonly handleWindowFocus = (): void => {
+    this.resetActiveContactState();
+    this.suppressLookInput(2);
+  };
+  private readonly handleVisibilityChange = (): void => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      this.resetActiveContactState();
+      return;
+    }
+    this.resetActiveContactState();
+    this.suppressLookInput(2);
+  };
+  private readonly handlePageHide = (): void => {
+    this.resetActiveContactState();
+  };
+  private readonly handlePageShow = (): void => {
+    this.resetActiveContactState();
     this.suppressLookInput(2);
   };
 
@@ -288,6 +339,13 @@ export class RaycastTouchInput {
       window.addEventListener('blur', this.handleWindowBlur);
       window.addEventListener('focus', this.handleWindowFocus);
     }
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', this.handleVisibilityChange);
+      document.addEventListener('pagehide', this.handlePageHide);
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pageshow', this.handlePageShow);
+    }
     this.rebuildOverlay();
   }
 
@@ -299,15 +357,36 @@ export class RaycastTouchInput {
     if (typeof window !== 'undefined') {
       window.removeEventListener('blur', this.handleWindowBlur);
       window.removeEventListener('focus', this.handleWindowFocus);
+      window.removeEventListener('pageshow', this.handlePageShow);
     }
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+      document.removeEventListener('pagehide', this.handlePageHide);
+    }
+    this.resetActiveContactState();
     this.clearOverlay();
   }
 
   setMode(mode: RaycastTouchMode): void {
     if (this.mode === mode) return;
+    this.resetActiveContactState();
     this.mode = mode;
     this.rebuildOverlay();
     this.suppressLookInput(2);
+  }
+
+  /** Drop active contacts when pausing, losing focus, or rebuilding overlay. */
+  resetActiveContactState(): void {
+    this.releaseCapturedPointers();
+    clearRaycastTouchTransientState({
+      activePointers: this.activePointers,
+      currentMove: this.currentMove,
+      currentLook: this.currentLook,
+      heldActions: this.heldActions,
+      pressedActions: this.pressedActions,
+      buttons: this.buttons.values()
+    });
+    this.lookSuppressionFrames = Math.max(this.lookSuppressionFrames, 1);
   }
 
   update(): void {
@@ -410,6 +489,7 @@ export class RaycastTouchInput {
   }
 
   private rebuildOverlay(): void {
+    this.resetActiveContactState();
     this.clearOverlay();
     const settings = this.getSettings();
     const { width, height } = this.getViewport();
@@ -436,7 +516,8 @@ export class RaycastTouchInput {
       const button = this.scene.add
         .rectangle(spec.x, spec.y, spec.width, spec.height, 0x071018, 0.72)
         .setStrokeStyle(2, 0x6bf2d5, 0.5)
-        .setDepth(91);
+        .setDepth(91)
+        .setInteractive({ useHandCursor: false });
       const label = this.scene.add
         .text(spec.x, spec.y, spec.label, {
           fontFamily: 'monospace',
@@ -587,19 +668,50 @@ export class RaycastTouchInput {
     this.showAudioPrompt(false);
   }
 
+  private maybePreventDefault(pointer: Phaser.Input.Pointer, capturedOverlayGesture: boolean): void {
+    if (!shouldRaycastTouchPreventDefault(this.mode, capturedOverlayGesture)) return;
+    if (pointer.event && typeof pointer.event.preventDefault === 'function') pointer.event.preventDefault();
+  }
+
+  private releaseCapturedPointers(): void {
+    const canvas = this.scene.game.canvas;
+    for (const pointerId of this.activePointers.keys()) {
+      try {
+        canvas?.releasePointerCapture?.(pointerId);
+      } catch {
+        // Pointer may already be released after blur / Control Center.
+      }
+    }
+    for (const pointer of this.scene.input.manager.pointers) {
+      if (!isTouchLikePointer(pointer) || !pointer.isDown) continue;
+      const target = (pointer.event as PointerEvent | undefined)?.target;
+      if (target && 'releasePointerCapture' in target) {
+        try {
+          (target as Element).releasePointerCapture(pointer.id);
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
   private processPointerDown(pointer: Phaser.Input.Pointer): void {
     if (!isTouchLikePointer(pointer)) return;
     this.unlockAudio();
     if (!this.active || this.layout.portraitPrompt) return;
-    if (pointer.event && typeof pointer.event.preventDefault === 'function') pointer.event.preventDefault();
 
     const x = pointer.x;
     const y = pointer.y;
     const button = this.findButtonAt(x, y);
     if (button) {
+      this.maybePreventDefault(pointer, true);
       this.activateButton(button, pointer.id);
       return;
     }
+
+    if (!shouldRaycastTouchCaptureBackgroundPointer(this.mode, false)) return;
+
+    this.maybePreventDefault(pointer, true);
 
     if (this.mode === 'gameplay') {
       const leftZone = x <= this.layout.width * 0.34;
@@ -622,17 +734,7 @@ export class RaycastTouchInput {
         lastX: x,
         lastY: y
       });
-      return;
     }
-
-    this.activePointers.set(pointer.id, {
-      kind: 'look',
-      pointerId: pointer.id,
-      originX: x,
-      originY: y,
-      lastX: x,
-      lastY: y
-    });
   }
 
   private processPointerMove(pointer: Phaser.Input.Pointer): void {
@@ -640,7 +742,7 @@ export class RaycastTouchInput {
     if (!this.active || this.layout.portraitPrompt) return;
     const state = this.activePointers.get(pointer.id);
     if (!state) return;
-    if (pointer.event && typeof pointer.event.preventDefault === 'function') pointer.event.preventDefault();
+    this.maybePreventDefault(pointer, true);
     if (state.kind === 'joystick') {
       const dx = pointer.x - state.originX;
       const dy = pointer.y - state.originY;
