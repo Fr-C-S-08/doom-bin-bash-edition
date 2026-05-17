@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ServerWorld } from '../src/ServerWorld.js';
+import { RAYCAST_LEVEL } from '../../src/game/raycast/RaycastLevel.js';
 
 describe('ServerWorld', () => {
   let world: ServerWorld;
@@ -19,9 +20,9 @@ describe('ServerWorld', () => {
     expect(p.maxHp).toBe(100);
     expect(p.weapon).toBe(1);
     expect(p.alive).toBe(true);
-    expect(p.x).toBe(0);
-    expect(p.y).toBe(0);
-    expect(p.yaw).toBe(0);
+    expect(p.x).toBeCloseTo(RAYCAST_LEVEL.playerStart.x);
+    expect(p.y).toBeCloseTo(RAYCAST_LEVEL.playerStart.y);
+    expect(p.yaw).toBeCloseTo(RAYCAST_LEVEL.playerStart.angle);
   });
 
   it('removePlayer deletes the player from state', () => {
@@ -48,7 +49,7 @@ describe('ServerWorld', () => {
     // Should not throw
     world.updatePlayerInput('nonexistent', { x: 99, y: 99, yaw: 0, seq: 1 });
     const snap = world.getSnapshot(1);
-    expect(snap.players[0].x).toBe(0);
+    expect(snap.players[0].x).toBeCloseTo(RAYCAST_LEVEL.playerStart.x);
   });
 
   it('getSnapshot includes all registered players', () => {

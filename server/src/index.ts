@@ -23,9 +23,10 @@ export function createServer(port: number): GameServer {
 
   const wss = new WebSocketServer({ host: '0.0.0.0', port });
 
-  // Tick loop — broadcasts a snapshot to all connected clients every 50 ms
+  // Tick loop — simulates world then broadcasts a snapshot every 50 ms
   const tickInterval = setInterval(() => {
     tick += 1;
+    if (players.size > 0) world.tick(TICK_INTERVAL_MS);
     const snapshot = world.getSnapshot(tick);
     const payload = JSON.stringify(snapshot);
     wss.clients.forEach((ws) => {

@@ -8,10 +8,10 @@
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "outDir": "dist",
-    "rootDir": ".",
+    "rootDir": "..",
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true
   },
-  "include": ["src/**/*", "tests/**/*", "../shared/**/*"]
+  "include": ["src/**/*", "tests/**/*", "../shared/**/*", "../src/**/*"]
 }
