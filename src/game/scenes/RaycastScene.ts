@@ -23,6 +23,7 @@ import { getRaycastCrosshairTargetInfo, RaycastCombatSystem } from '../raycast/R
 import {
   cloneRaycastEnemies,
   createTelegraphedRaycastEnemy,
+  createRaycastEnemy,
   didRaycastEnemyFinishTelegraph,
   type RaycastEnemy
 } from '../raycast/RaycastEnemy';
@@ -224,6 +225,7 @@ import {
 import { NetClient } from '../net/NetClient';
 import { NetState } from '../net/NetState';
 import type { SnapshotMessage } from '../../../shared/protocol';
+import type { EnemyState } from '../../../shared/types';
 import { TICK_INTERVAL_MS } from '../../../shared/constants';
 
 interface RaycastSceneData {
@@ -684,7 +686,14 @@ export class RaycastScene extends Phaser.Scene {
         if (!this.netClient || !this.netState) return;
         this.netState.localPlayerId = this.netClient.playerId;
         this.netClient.on<SnapshotMessage>('snapshot', (snap) => {
-          this.netState?.applySnapshot(snap);
+          if (!this.netState) return;
+          this.netState.applySnapshot(snap);
+          this.syncEnemiesFromSnapshot(snap.enemies);
+          const local = this.netState.getLocalPlayer();
+          if (local) {
+            this.playerHealth = local.hp;
+            if (local.hp <= 0) this.playerAlive = false;
+          }
         });
         this.netConnected = true;
       }).catch((err: unknown) => {
@@ -1144,8 +1153,10 @@ export class RaycastScene extends Phaser.Scene {
       this.controller.update(delta);
       this.updatePlayerMetrics(delta);
       this.updateLevelState();
-      this.updateEnemies(delta);
-      this.updateGameDirector();
+      if (!this.netConnected) {
+        this.updateEnemies(delta);
+        this.updateGameDirector();
+      }
       this.updateAtmospherePulse();
       this.updateCorruptionSurge();
       this.updateBlackoutPulse();
@@ -2596,6 +2607,39 @@ export class RaycastScene extends Phaser.Scene {
    * so only the base circle is drawn, keeping the visual minimal and distinct
    * from enemy silhouettes.
    */
+  /**
+   * Multiplayer (Phase 3): replaces the local enemies array with authoritative
+   * data from the server snapshot.  Existing entries are updated in-place to
+   * preserve client-side visual state (hit flash, death burst, etc.).
+   * New entries are created via createRaycastEnemy so all required fields are
+   * initialised correctly, then overridden with server-authoritative values.
+   */
+  private syncEnemiesFromSnapshot(enemyStates: EnemyState[]): void {
+    const existingById = new Map(this.enemies.map((e) => [e.id, e]));
+    this.enemies = enemyStates.map((es) => {
+      const existing = existingById.get(es.id);
+      const alive = es.state !== 'DEAD';
+      const now = this.time.now;
+
+      if (existing) {
+        existing.x = es.x;
+        existing.y = es.y;
+        existing.health = es.hp;
+        existing.alive = alive;
+        existing.spawnTelegraphUntil = es.state === 'SPAWN' ? now + 9999 : 0;
+        existing.attackWindupUntil = es.state === 'ATTACK' ? now + 9999 : 0;
+        return existing;
+      }
+
+      const enemy = createRaycastEnemy({ id: es.id, kind: es.archetype as EnemyKind, x: es.x, y: es.y });
+      enemy.health = es.hp;
+      enemy.alive = alive;
+      if (es.state === 'SPAWN') enemy.spawnTelegraphUntil = now + 9999;
+      if (es.state === 'ATTACK') enemy.attackWindupUntil = now + 9999;
+      return enemy;
+    });
+  }
+
   private buildRemotePlayerBillboards(): RaycastBillboard[] {
     if (!this.netState) return [];
     return this.netState.getRemotePlayers().map((p) => ({
