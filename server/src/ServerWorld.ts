@@ -79,7 +79,10 @@ export class ServerWorld {
     );
 
     if (enemy) {
-      applyDamage(enemy, config.damage);
+      // Server-side hitscan is instantaneous: assume all pellets in the cone
+      // connected (best-case approximation). Client's findEnemyInCrosshair
+      // already validated the target is in line-of-sight.
+      applyDamage(enemy, config.damage * config.pelletCount);
     }
   }
 
