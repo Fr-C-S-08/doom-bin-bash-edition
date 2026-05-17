@@ -25,6 +25,11 @@ export class ServerWorld {
   private totalKills = 0;
   private gameOverFired = false;
   private readonly pendingEvents: ServerEvent[] = [];
+  // Initialized to 0 so timeSincePlayerDamagedMs grows naturally from game start.
+  // The director won't fire dominance escalation until dominanceNoDamageMs (9200ms)
+  // have elapsed without any player taking melee damage — identical to single-player
+  // behavior where the timer resets on each hit.
+  private lastPlayerDamageAt = 0;
 
   addPlayer(id: string, name: string): void {
     this.playerStates.set(id, {
@@ -119,6 +124,7 @@ export class ServerWorld {
           target.alive = false;
           target.respawnAtTick = this.currentTick + respawnTicks;
         }
+        this.lastPlayerDamageAt = this.serverTime;
       }
     }
 
@@ -128,7 +134,8 @@ export class ServerWorld {
       totalKills: this.totalKills,
       enemiesAlive: aliveAfterTick,
       players: players.map((p) => ({ health: p.hp, alive: p.alive })),
-      currentWave: 1
+      currentWave: 1,
+      timeSincePlayerDamagedMs: this.serverTime - this.lastPlayerDamageAt
     });
 
     if (decision.spawn) this.spawnEnemy(decision.spawn);
@@ -147,6 +154,16 @@ export class ServerWorld {
   /** Returns and clears any events accumulated during the last tick. */
   drainEvents(): ServerEvent[] {
     return this.pendingEvents.splice(0);
+  }
+
+  /** Exposed for testing — returns the last server time at which any player took damage. */
+  getLastPlayerDamageAt(): number {
+    return this.lastPlayerDamageAt;
+  }
+
+  /** Exposed for testing — returns current server time. */
+  getServerTime(): number {
+    return this.serverTime;
   }
 
   getSnapshot(tick: number): SnapshotMessage {
