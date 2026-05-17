@@ -56,6 +56,8 @@ export interface RaycastEnemy {
   speedMultiplier?: number;
   projectileSpeedMultiplier?: number;
   variant?: RaycastEnemyVariant;
+  /** Rare elite call-sign shown in HUD when variant is ELITE. */
+  eliteDisplayName?: string;
   variantAccentColor?: number;
   frontalDamageReduction?: number;
   shieldPulseUntil?: number;

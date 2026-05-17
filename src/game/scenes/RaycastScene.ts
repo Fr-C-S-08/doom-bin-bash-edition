@@ -9,7 +9,7 @@ import {
 } from '../systems/EncounterPattern';
 import { KeySystem } from '../systems/KeySystem';
 import { TriggerSystem } from '../systems/TriggerSystem';
-import { getEnemyConfig, getRaycastEnemyRoleAbbrev } from '../entities/enemyConfig';
+import { getEnemyConfig } from '../entities/enemyConfig';
 import type { EnemyKind } from '../types/game';
 import {
   AudioFeedbackSystem,
@@ -120,6 +120,15 @@ import {
   tickDualBossCoordination
 } from '../raycast/RaycastBossAI';
 import {
+  adjustDirectorSpawnKind,
+  countAliveByKind,
+  formatRaycastEnemyIdentityLabel,
+  getRaycastEliteKillScoreBonus,
+  getRaycastEnemyIdentity,
+  getRaycastSpawnTelegraphMs,
+  rollRaycastEnemyVariant
+} from '../raycast/RaycastEnemyIdentity';
+import {
   createRaycastBossHazardState,
   getRaycastBossHazardMarkers,
   tickRaycastBossHazards,
@@ -162,7 +171,6 @@ import {
   applyRaycastVariantToBaseHealth,
   getRaycastFlashDurationMs,
   getRaycastVariantModifiers,
-  type RaycastEnemyVariant
 } from '../raycast/RaycastEnemyVariants';
 import type { RaycastSetpieceCue } from '../raycast/RaycastSetpiece';
 import {
@@ -292,8 +300,6 @@ interface RaycastSceneData {
 
 const DIRECTOR_SPAWN_TELEGRAPH_MS = 820;
 const ENCOUNTER_SPAWN_TELEGRAPH_MS = 980;
-const VISIBLE_SPAWN_TELEGRAPH_BONUS_MS = 260;
-const CLOSE_SPAWN_TELEGRAPH_BONUS_MS = 180;
 const DEV_SHORTCUT_ENABLED = import.meta.env.DEV;
 const BASE_PLAYER_MAX_HEALTH = 100;
 const REWARD_DAMAGE_STEP = 0.2;
@@ -1798,21 +1804,14 @@ export class RaycastScene extends Phaser.Scene {
 
   private withVariantApplied(enemy: RaycastEnemy, rng: () => number, indexSeed = 0): RaycastEnemy {
     const next = { ...enemy };
-    const roll = (rng() + indexSeed * 0.037) % 1;
     const eliteRateBonus = this.runModifier?.effects.eliteRateBonus ?? 0;
-    const eliteThreshold = 0.2 + eliteRateBonus;
-    let variant: RaycastEnemyVariant = 'BASE';
-    if (next.kind === 'RANGED' && roll < 0.3) variant = 'SNIPER';
-    else if (next.kind === 'SCRAMBLER' && roll < 0.22) variant = 'EXPLODER';
-    else if ((next.kind === 'BRUTE' || next.kind === 'RANGED') && roll < eliteThreshold) variant = 'ELITE';
-    else if (next.kind === 'GRUNT' && roll < 0.16) variant = 'BERSERK';
-    else if ((next.kind === 'GRUNT' || next.kind === 'BRUTE') && roll >= 0.16 && roll < 0.28) variant = 'SHIELDED';
-    else if (roll > 0.88) variant = 'CORRUPTED';
-    if (roll > 0.92 && next.kind === 'STALKER') next.kind = 'FLASHER';
-
-    const mods = getRaycastVariantModifiers(variant, this.activeLevelEvent, roll);
-    const baseCfg = getEnemyConfig(next.kind, 'raycast');
-    next.variant = variant;
+    const rolled = rollRaycastEnemyVariant(next.kind, rng, indexSeed, eliteRateBonus);
+    const mods = getRaycastVariantModifiers(rolled.variant, this.activeLevelEvent, rng());
+    const baseCfg = getEnemyConfig(rolled.kind, 'raycast');
+    next.kind = rolled.kind;
+    next.variant = rolled.variant;
+    next.eliteDisplayName = rolled.eliteDisplayName;
+    next.color = baseCfg.color;
     next.variantAccentColor = mods.outlineAccent;
     next.maxHealth = applyRaycastVariantToBaseHealth(baseCfg, mods);
     next.health = next.maxHealth;
@@ -1933,6 +1932,11 @@ export class RaycastScene extends Phaser.Scene {
     this.enemiesKilled += result.killCount;
     if (result.killedEnemyKinds.length > 0) {
       this.runScore += this.applyEventScoreGain(addRaycastKillScore(0, result.killedEnemyKinds));
+      const eliteBonus = getRaycastEliteKillScoreBonus(this.enemies, this.time.now);
+      if (eliteBonus > 0) {
+        this.runScore += this.applyEventScoreGain(eliteBonus);
+        this.setCombatMessage('ELITE TERMINATED // BONUS CORE', 1400);
+      }
     }
     const splashImpact = result.weaponKind === 'LAUNCHER' && result.splashHitCount > 0;
     if (splashImpact) {
@@ -2451,8 +2455,12 @@ export class RaycastScene extends Phaser.Scene {
       this.pulseFeedback(0xd5b4ff, 0.08, 220);
     }
     if (activatedTelegraphs.length > 0) {
-      this.audioFeedback.play('spawn', 0.84, this.time.now);
-      this.pulseFeedback(0xffb347, 0.04, 120);
+      const materialized = this.enemies.find((enemy) => enemy.id === activatedTelegraphs[0]);
+      const identity = materialized ? getRaycastEnemyIdentity(materialized.kind) : null;
+      this.audioFeedback.play('spawn', 0.84, this.time.now, {
+        pitchMul: identity?.spawnAudioPitchMul ?? 1
+      });
+      this.pulseFeedback(identity?.telegraphColor ?? 0xffb347, 0.04, 120);
       this.setCombatMessage(activatedTelegraphs.length > 1 ? 'HOSTILES MATERIALIZADOS' : 'BRECHA HOSTIL ABIERTA');
     }
     if (enemyResult.spawnedProjectiles.length > 0) {
@@ -3166,8 +3174,14 @@ export class RaycastScene extends Phaser.Scene {
       }
     });
 
-    if (spawn && !spawnedFromEvent) this.spawnDirectorEnemy(spawn);
-    extraSpawns.forEach((req) => this.spawnDirectorEnemy(req));
+    if (spawn && !spawnedFromEvent) this.spawnDirectorEnemy(this.balanceDirectorSpawn(spawn));
+    extraSpawns.forEach((req) => this.spawnDirectorEnemy(this.balanceDirectorSpawn(req)));
+  }
+
+  private balanceDirectorSpawn(spawn: SpawnRequest): SpawnRequest {
+    const rng = createSeededLevelEventRng(`${spawn.kind}:${this.time.now}:${this.directorSpawnCounter}`);
+    const kind = adjustDirectorSpawnKind(spawn.kind, countAliveByKind(this.enemies), rng);
+    return kind === spawn.kind ? spawn : { ...spawn, kind };
   }
 
   private announceDirectorStateChange(previousState: DirectorState | null, nextState: DirectorState): void {
@@ -3202,24 +3216,31 @@ export class RaycastScene extends Phaser.Scene {
     const rng = createSeededLevelEventRng(`${spawn.kind}:${spawn.x}:${spawn.y}:${this.time.now}`);
     const staged = this.withVariantApplied(enemy, rng, this.directorSpawnCounter);
     if (spawnPressure > 1) staged.speedMultiplier = (staged.speedMultiplier ?? 1) * Math.min(1.2, spawnPressure);
-    const isElite = staged.kind === 'BRUTE' || staged.kind === 'RANGED' || staged.kind === 'SCRAMBLER';
-    if (isElite) {
-      staged.damageMultiplier = (staged.damageMultiplier ?? 1) * (this.activeLevelEvent.effects.eliteDamageMultiplier ?? 1);
+    const identity = getRaycastEnemyIdentity(staged.kind);
+    if (staged.variant === 'ELITE') {
+      staged.damageMultiplier =
+        (staged.damageMultiplier ?? 1) * (this.activeLevelEvent.effects.eliteDamageMultiplier ?? 1);
       const eliteHealthMul = this.activeLevelEvent.effects.eliteHealthMultiplier ?? 1;
       staged.maxHealth = Math.max(1, Math.round(staged.maxHealth * eliteHealthMul));
       staged.health = staged.maxHealth;
+    } else if (staged.kind === 'BRUTE' || staged.kind === 'RANGED' || staged.kind === 'SCRAMBLER') {
+      staged.damageMultiplier = (staged.damageMultiplier ?? 1) * (this.activeLevelEvent.effects.eliteDamageMultiplier ?? 1);
+      const eliteHealthMul = this.activeLevelEvent.effects.eliteHealthMultiplier ?? 1;
+      if (eliteHealthMul > 1) {
+        staged.maxHealth = Math.max(1, Math.round(staged.maxHealth * eliteHealthMul));
+        staged.health = staged.maxHealth;
+      }
     }
     this.enemies.push(staged);
     this.directorSpawnCounter += 1;
-    this.audioFeedback.play('directorAmbush', 1, this.time.now);
+    this.audioFeedback.play('directorAmbush', 1, this.time.now, { pitchMul: identity.spawnAudioPitchMul * 0.98 });
     this.pulseCorruption();
-    this.pulseFeedback(0xff5b6f, 0.06, 160);
-    const roleTag = getRaycastEnemyRoleAbbrev(spawn.kind);
-    this.setCombatMessage(
-      this.getWorldSegment() === 'world2'
-        ? `STRATUM SIGNATURE: ${spawn.kind} (${roleTag})`
-        : `HOSTILE SIGNAL DETECTED: ${spawn.kind} (${roleTag})`
-    );
+    this.pulseFeedback(identity.telegraphColor, 0.06, 160);
+    if (staged.variant === 'ELITE' && staged.eliteDisplayName) {
+      this.setCombatMessage(`ELITE SIGNAL: ${staged.eliteDisplayName} // ${identity.roleTitle}`, 2400);
+    } else {
+      this.setCombatMessage(`HOSTILE: ${formatRaycastEnemyIdentityLabel(staged)}`, 1200);
+    }
   }
 
   private createTelegraphedSpawnEnemy(
@@ -3231,10 +3252,12 @@ export class RaycastScene extends Phaser.Scene {
     const visibleToPlayer = this.hasLineOfSightToPoint(safe.x, safe.y);
     const distanceToPlayer = Math.hypot(safe.x - this.player.x, safe.y - this.player.y);
     const baseDuration = source === 'director' ? DIRECTOR_SPAWN_TELEGRAPH_MS : ENCOUNTER_SPAWN_TELEGRAPH_MS;
-    const telegraphDurationMs =
-      baseDuration +
-      (visibleToPlayer ? VISIBLE_SPAWN_TELEGRAPH_BONUS_MS : 0) +
-      (distanceToPlayer <= 5.5 ? CLOSE_SPAWN_TELEGRAPH_BONUS_MS : 0);
+    const telegraphDurationMs = getRaycastSpawnTelegraphMs({
+      baseMs: baseDuration,
+      kind: spawn.kind,
+      visibleToPlayer,
+      distanceToPlayer
+    });
 
     return createTelegraphedRaycastEnemy({ ...spawn, x: safe.x, y: safe.y }, {
       telegraphStartedAt: this.time.now,

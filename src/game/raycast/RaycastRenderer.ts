@@ -29,6 +29,7 @@ import {
 import { RAYCAST_DEATH_BURST_MS } from './RaycastCombatSystem';
 import type { RaycastBossState } from './RaycastBoss';
 import { getRaycastBossVisualProfile } from './RaycastBossVisual';
+import { getRaycastEnemyIdentity, RAYCAST_ENEMY_READABILITY } from './RaycastEnemyIdentity';
 import {
   getBillboardColor,
   getRaycastCellVariant,
@@ -209,6 +210,7 @@ export class RaycastRenderer {
       const hitStaggerX = getEnemyFlinchScreenOffset(projection.enemy, projection.size, time);
 
       if (isRaycastEnemyTelegraphing(projection.enemy, time)) {
+        const spawnIdentity = getRaycastEnemyIdentity(projection.enemy.kind);
         const progress = getRaycastEnemySpawnTelegraphProgress(projection.enemy, time);
         const pulse = Math.sin(time / 64) * 0.5 + 0.5;
         const visibility = calculateEnemyVisibility(projection.distance, atmosphere);
@@ -223,9 +225,9 @@ export class RaycastRenderer {
           projection.size * 1.2,
           projection.size * 1.4
         );
-        this.graphics.fillStyle(RAYCAST_PALETTE.telegraphRose, 0.16 * visibility + progress * 0.08);
+        this.graphics.fillStyle(spawnIdentity.telegraphColor, 0.16 * visibility + progress * 0.08);
         this.graphics.fillCircle(tx, height * 0.5, haloRadius);
-        this.graphics.lineStyle(4, RAYCAST_PALETTE.telegraphAmber, alpha);
+        this.graphics.lineStyle(4, spawnIdentity.telegraphColor, alpha);
         this.graphics.strokeCircle(tx, height * 0.5, markerRadius);
         this.graphics.lineStyle(2, 0xffffff, (0.35 + pulse * 0.12) * visibility);
         this.graphics.lineBetween(
@@ -240,9 +242,9 @@ export class RaycastRenderer {
           tx,
           height * 0.5 + projection.size * 0.36
         );
-        this.graphics.fillStyle(RAYCAST_PALETTE.amberSoft, (0.55 + pulse * 0.16) * visibility);
+        this.graphics.fillStyle(spawnIdentity.windupColor, (0.55 + pulse * 0.16) * visibility);
         this.graphics.fillRect(tx - projection.size * 0.2, height * 0.5 - projection.size * 0.9, projection.size * 0.4, 5);
-        this.graphics.fillStyle(RAYCAST_PALETTE.telegraphRose, 0.78 * visibility);
+        this.graphics.fillStyle(spawnIdentity.identityColor, 0.78 * visibility);
         this.graphics.fillRect(
           tx - projection.size * 0.28,
           height * 0.5 - projection.size * 0.52,
@@ -276,6 +278,11 @@ export class RaycastRenderer {
       if ((projection.enemy.shieldPulseUntil ?? 0) > time) {
         this.graphics.lineStyle(3, 0x8fd8ff, 0.62 * visibility);
         this.graphics.strokeEllipse(sx, height * 0.5 + size * 0.08, size * 1.38, size * 1.46);
+      }
+      if (projection.enemy.variant === 'ELITE') {
+        const eliteRing = size * RAYCAST_ENEMY_READABILITY.eliteAuraScale;
+        this.graphics.lineStyle(2, projection.enemy.variantAccentColor ?? 0xffe39c, RAYCAST_ENEMY_READABILITY.eliteAuraAlpha * visibility);
+        this.graphics.strokeEllipse(sx, height * 0.5 + size * 0.08, eliteRing, eliteRing * 1.04);
       }
       if (isWindingUp) {
         this.graphics.fillStyle(enemyStyle.windupColor, (0.18 + windupProgress * 0.14 + pulse * 0.08) * visibility);
