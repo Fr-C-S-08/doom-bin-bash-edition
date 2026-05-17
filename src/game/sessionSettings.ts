@@ -1,4 +1,4 @@
-/** Session-only preferences (Phaser registry). No localStorage — survives scene changes within one page load. */
+/** Runtime preferences mirrored in Phaser registry; persisted via SaveManager when hooks are bound. */
 
 export const SESSION_MOUSE_SENS_KEY = 'session_mouse_sens';
 export const SESSION_GAMEPAD_SENS_KEY = 'session_gamepad_sens';
@@ -64,6 +64,7 @@ export function getMouseSensitivity(registry: SessionRegistry): number {
 
 export function setMouseSensitivity(registry: SessionRegistry, value: number): void {
   registry.set(SESSION_MOUSE_SENS_KEY, clamp(value, 0.35, 2.25));
+  notifySessionSettingsPersist();
 }
 
 export function getGamepadSensitivity(registry: SessionRegistry): number {
@@ -74,6 +75,7 @@ export function getGamepadSensitivity(registry: SessionRegistry): number {
 
 export function setGamepadSensitivity(registry: SessionRegistry, value: number): void {
   registry.set(SESSION_GAMEPAD_SENS_KEY, clamp(value, 0.35, 2.25));
+  notifySessionSettingsPersist();
 }
 
 export function getGamepadDeadzone(registry: SessionRegistry): number {
@@ -89,6 +91,7 @@ export function getGamepadLeftDeadzone(registry: SessionRegistry): number {
 
 export function setGamepadLeftDeadzone(registry: SessionRegistry, value: number): void {
   registry.set(SESSION_GAMEPAD_LEFT_DEADZONE_KEY, clamp(value, 0.05, 0.4));
+  notifySessionSettingsPersist();
 }
 
 export function getGamepadRightDeadzone(registry: SessionRegistry): number {
@@ -103,6 +106,7 @@ export function setGamepadRightDeadzone(registry: SessionRegistry, value: number
   const clamped = clamp(value, 0.05, 0.4);
   registry.set(SESSION_GAMEPAD_DEADZONE_KEY, clamped);
   registry.set(SESSION_GAMEPAD_RIGHT_DEADZONE_KEY, clamped);
+  notifySessionSettingsPersist();
 }
 
 export function setGamepadDeadzone(registry: SessionRegistry, value: number): void {
@@ -116,6 +120,7 @@ export function getGamepadInvertY(registry: SessionRegistry): boolean {
 
 export function setGamepadInvertY(registry: SessionRegistry, enabled: boolean): void {
   registry.set(SESSION_GAMEPAD_INVERT_Y_KEY, Boolean(enabled));
+  notifySessionSettingsPersist();
 }
 
 export function getGamepadVibrationEnabled(registry: SessionRegistry): boolean {
@@ -125,6 +130,7 @@ export function getGamepadVibrationEnabled(registry: SessionRegistry): boolean {
 
 export function setGamepadVibrationEnabled(registry: SessionRegistry, enabled: boolean): void {
   registry.set(SESSION_GAMEPAD_VIBRATION_KEY, Boolean(enabled));
+  notifySessionSettingsPersist();
 }
 
 export function getScreenshakeEnabled(registry: SessionRegistry): boolean {
@@ -134,6 +140,7 @@ export function getScreenshakeEnabled(registry: SessionRegistry): boolean {
 
 export function setScreenshakeEnabled(registry: SessionRegistry, enabled: boolean): void {
   registry.set(SESSION_SCREENSHAKE_KEY, Boolean(enabled));
+  notifySessionSettingsPersist();
 }
 
 export function getMinimapDefaultVisible(registry: SessionRegistry): boolean {
@@ -143,6 +150,7 @@ export function getMinimapDefaultVisible(registry: SessionRegistry): boolean {
 
 export function setMinimapDefaultVisible(registry: SessionRegistry, visible: boolean): void {
   registry.set(SESSION_MINIMAP_DEFAULT_KEY, Boolean(visible));
+  notifySessionSettingsPersist();
 }
 
 export function getSessionMasterVolume(registry: SessionRegistry): number {
@@ -153,6 +161,7 @@ export function getSessionMasterVolume(registry: SessionRegistry): number {
 
 export function setSessionMasterVolume(registry: SessionRegistry, linear: number): void {
   registry.set(SESSION_MASTER_VOLUME_KEY, clamp(linear, 0, 1));
+  notifySessionSettingsPersist();
 }
 
 export function getTouchControlsEnabled(registry: SessionRegistry): boolean {
@@ -162,6 +171,7 @@ export function getTouchControlsEnabled(registry: SessionRegistry): boolean {
 
 export function setTouchControlsEnabled(registry: SessionRegistry, enabled: boolean): void {
   registry.set(SESSION_TOUCH_CONTROLS_KEY, Boolean(enabled));
+  notifySessionSettingsPersist();
 }
 
 export function getTouchLookSensitivity(registry: SessionRegistry): number {
@@ -172,6 +182,7 @@ export function getTouchLookSensitivity(registry: SessionRegistry): number {
 
 export function setTouchLookSensitivity(registry: SessionRegistry, value: number): void {
   registry.set(SESSION_TOUCH_LOOK_SENS_KEY, clamp(value, 0.45, 2.2));
+  notifySessionSettingsPersist();
 }
 
 export function getTouchButtonScale(registry: SessionRegistry): number {
@@ -182,6 +193,7 @@ export function getTouchButtonScale(registry: SessionRegistry): number {
 
 export function setTouchButtonScale(registry: SessionRegistry, value: number): void {
   registry.set(SESSION_TOUCH_BUTTON_SCALE_KEY, clamp(value, 0.8, 1.4));
+  notifySessionSettingsPersist();
 }
 
 export function getTouchJoystickDeadzone(registry: SessionRegistry): number {
@@ -192,4 +204,15 @@ export function getTouchJoystickDeadzone(registry: SessionRegistry): number {
 
 export function setTouchJoystickDeadzone(registry: SessionRegistry, value: number): void {
   registry.set(SESSION_TOUCH_JOYSTICK_DEADZONE_KEY, clamp(value, 0.05, 0.4));
+  notifySessionSettingsPersist();
+}
+
+let sessionSettingsPersistHook: (() => void) | null = null;
+
+export function registerSessionSettingsPersistHook(hook: () => void): void {
+  sessionSettingsPersistHook = hook;
+}
+
+function notifySessionSettingsPersist(): void {
+  sessionSettingsPersistHook?.();
 }

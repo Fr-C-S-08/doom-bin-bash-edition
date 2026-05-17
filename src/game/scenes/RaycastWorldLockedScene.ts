@@ -1,8 +1,8 @@
 import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH } from '../dimensions';
 import { RAYCAST_CSS_WORLD2, RAYCAST_PALETTE } from '../raycast/RaycastPalette';
+import { prepareGameSession } from '../save/persistSessionSettings';
 import {
-  ensureSessionSettings,
   getGamepadInvertY,
   getGamepadLeftDeadzone,
   getGamepadRightDeadzone,
@@ -27,7 +27,7 @@ export class RaycastWorldLockedScene extends Phaser.Scene {
   }
 
   create(): void {
-    ensureSessionSettings(this.registry);
+    prepareGameSession(this.registry);
     this.gamepadInput = new RaycastGamepadInput({
       getSettings: () => ({
         leftDeadzone: getGamepadLeftDeadzone(this.registry),

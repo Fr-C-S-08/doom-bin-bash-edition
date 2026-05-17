@@ -217,8 +217,9 @@ import { getRaycastBossLevelId, resolveRaycastBossShortcutLevelId, type RaycastB
 import { RaycastGamepadInput } from '../systems/RaycastGamepadInput';
 import { RaycastTouchInput } from '../systems/RaycastTouchInput';
 import { palette } from '../theme/palette';
+import { getSaveManager } from '../save/SaveManager';
+import { prepareGameSession } from '../save/persistSessionSettings';
 import {
-  ensureSessionSettings,
   getGamepadInvertY,
   getGamepadLeftDeadzone,
   getGamepadRightDeadzone,
@@ -729,7 +730,7 @@ export class RaycastScene extends Phaser.Scene {
 
   create(): void {
     registerRaycastOptionalAssets(this);
-    ensureSessionSettings(this.registry);
+    prepareGameSession(this.registry);
     this.resetRuntimeState();
     this.cameras.main.setBackgroundColor(
       this.getWorldSegment() === 'world2' ? '#030612' : this.getWorldSegment() === 'world3' ? '#0c0604' : '#05070c'
@@ -2641,6 +2642,19 @@ export class RaycastScene extends Phaser.Scene {
       bossPelletsHitHostile: this.runBossPelletsHitHostile,
       bossDamageTaken: this.runBossDamageTaken,
       campaign: episodeComplete ? this.campaignMetrics : undefined
+    });
+    const runRank = this.runRankByLevelId.get(this.currentLevel.id) ?? 'C';
+    getSaveManager().recordRunOutcome({
+      levelId: this.currentLevel.id,
+      difficultyId: this.difficultyId,
+      outcome: isDeath ? 'death' : 'clear',
+      elapsedMs: this.time.now - this.runStartedAt,
+      score: this.runScore,
+      rank: runRank,
+      pelletsFired: this.runPelletsFired,
+      pelletsHitHostile: this.runPelletsHitHostile,
+      enemiesKilled: this.enemiesKilled,
+      secretsFound: this.collectedSecrets.size
     });
     writeRaycastHighScoreIfBetter(this.runScore);
     const highScore = readRaycastHighScore();

@@ -1,4 +1,5 @@
 import type { EnemyKind } from '../types/game';
+import { getGameSaveStorage } from '../save/SaveManager';
 
 export const RAYCAST_HIGH_SCORE_STORAGE_KEY = 'raycast_high_score_v1';
 
@@ -371,9 +372,9 @@ export function formatRaycastSectorMedalLabel(id: string): string {
   }
 }
 
-export function readRaycastHighScore(storage: Pick<Storage, 'getItem'> = typeof localStorage !== 'undefined'
-  ? localStorage
-  : { getItem: () => null }): number {
+export function readRaycastHighScore(
+  storage: Pick<Storage, 'getItem'> = getGameSaveStorage()
+): number {
   try {
     const raw = storage.getItem(RAYCAST_HIGH_SCORE_STORAGE_KEY);
     if (!raw) return 0;
@@ -386,9 +387,7 @@ export function readRaycastHighScore(storage: Pick<Storage, 'getItem'> = typeof 
 
 export function writeRaycastHighScoreIfBetter(
   score: number,
-  storage: Pick<Storage, 'getItem' | 'setItem'> = typeof localStorage !== 'undefined'
-    ? localStorage
-    : { getItem: () => null, setItem: () => {} }
+  storage: Pick<Storage, 'getItem' | 'setItem'> = getGameSaveStorage()
 ): boolean {
   if (!Number.isFinite(score) || score < 0) return false;
   const prev = readRaycastHighScore(storage);

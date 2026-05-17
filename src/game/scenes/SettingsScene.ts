@@ -1,8 +1,8 @@
 import Phaser from 'phaser';
 import { AudioFeedbackSystem } from '../systems/AudioFeedbackSystem';
 import { RAYCAST_CSS, RAYCAST_PALETTE } from '../raycast/RaycastPalette';
+import { prepareGameSession, setPreferFullscreenSaved } from '../save/persistSessionSettings';
 import {
-  ensureSessionSettings,
   getGamepadInvertY,
   getGamepadLeftDeadzone,
   getGamepadRightDeadzone,
@@ -97,8 +97,10 @@ export class SettingsScene extends Phaser.Scene {
     if (ROW_KEYS[this.rowIndex] === 'fullscreen') {
       if (this.scale.isFullscreen) {
         this.scale.stopFullscreen();
+        setPreferFullscreenSaved(false);
       } else {
         void this.scale.startFullscreen();
+        setPreferFullscreenSaved(true);
       }
       this.audioPreview.play('uiConfirm', 0.68, this.time.now);
       this.refreshBody();
@@ -110,7 +112,7 @@ export class SettingsScene extends Phaser.Scene {
   }
 
   create(): void {
-    ensureSessionSettings(this.registry);
+    prepareGameSession(this.registry);
     const width = this.scale.width;
     const height = this.scale.height;
     this.audioPreview = new AudioFeedbackSystem();
@@ -334,6 +336,6 @@ export class SettingsScene extends Phaser.Scene {
     label('fullscreen', `PANTALLA COMPLETA · ${fs}`);
     label('back', 'VOLVER AL MENÚ ← ENTER / ESC');
 
-    this.bodyText.setText(['Ajustes aplican a esta sesión únicamente.', '', ...rows].join('\n'));
+    this.bodyText.setText(['Ajustes guardados en este dispositivo.', '', ...rows].join('\n'));
   }
 }

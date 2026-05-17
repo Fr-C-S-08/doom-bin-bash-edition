@@ -9,8 +9,8 @@ import {
 import { buildMainMenuLayout, getMainMenuCopy } from '../raycast/RaycastPresentation';
 import { RAYCAST_CSS, RAYCAST_PALETTE } from '../raycast/RaycastPalette';
 import { createEmptyCampaignMetrics } from '../raycast/RaycastScore';
+import { prepareGameSession } from '../save/persistSessionSettings';
 import {
-  ensureSessionSettings,
   getGamepadInvertY,
   getGamepadLeftDeadzone,
   getGamepadRightDeadzone,
@@ -117,7 +117,7 @@ export class MenuScene extends Phaser.Scene {
   }
 
   create(): void {
-    ensureSessionSettings(this.registry);
+    prepareGameSession(this.registry);
     const width = this.scale.width;
     const height = this.scale.height;
     const copy = getMainMenuCopy();
