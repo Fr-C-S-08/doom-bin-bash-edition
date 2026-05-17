@@ -18,6 +18,8 @@ export const RAYCAST_OPTIONAL_TEXTURE_KEYS = {
   weaponShotgun: "raycast_weapon_shotgun",
   weaponLauncher: "raycast_weapon_launcher",
   hudFrame: "raycast_hud_frame",
+  wall01: "raycast_level_wall_01",
+  wall02: "raycast_level_wall_02",
 } as const;
 
 export const RAYCAST_ENEMY_TEXTURE_KEYS: Record<
@@ -88,6 +90,18 @@ const OPTIONAL_IMAGE_ASSETS = [
     key: RAYCAST_OPTIONAL_TEXTURE_KEYS.weaponLauncher,
     path: "assets/raycast/weapons/raygun.png",
   },
+
+  //WALLS
+  {
+    key: RAYCAST_OPTIONAL_TEXTURE_KEYS.wall01,
+    path: "assets/raycast/levels/walls/wall_01.png",
+  },
+
+  {
+    key: RAYCAST_OPTIONAL_TEXTURE_KEYS.wall02,
+    path: "assets/raycast/levels/walls/wall_02.png",
+  },
+
   // GRUNT
   {
     key: RAYCAST_ENEMY_TEXTURE_KEYS.GRUNT.idle,
