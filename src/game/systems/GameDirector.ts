@@ -11,10 +11,7 @@ export interface GameDirectorInput {
   elapsedTime: number;
   totalKills: number;
   enemiesAlive: number;
-  p1Health: number;
-  p2Health: number;
-  p1Alive: boolean;
-  p2Alive: boolean;
+  players: ReadonlyArray<{ readonly health: number; readonly alive: boolean }>;
   currentWave: number;
   timeSincePlayerDamagedMs?: number;
   playerStationaryMs?: number;
@@ -234,7 +231,7 @@ export class GameDirector {
   }
 
   calculateIntensity(input: GameDirectorInput): number {
-    if (!input.p1Alive && !input.p2Alive) return 0;
+    if (!input.players.some((p) => p.alive)) return 0;
 
     let intensity = 1;
     if (input.elapsedTime >= 30_000) intensity += 1;
@@ -243,7 +240,7 @@ export class GameDirector {
     if (input.totalKills >= 6) intensity += 1;
     intensity += Math.max(0, input.currentWave - 1);
 
-    if (input.p1Alive && input.p2Alive && input.p1Health >= this.config.comfortableHealthThreshold && input.p2Health >= this.config.comfortableHealthThreshold) {
+    if (input.players.every((p) => p.alive && p.health >= this.config.comfortableHealthThreshold)) {
       intensity += 1;
     }
 
@@ -258,11 +255,9 @@ export class GameDirector {
     if (input.activeZoneId) intensity += 1;
     if ((input.distanceToImportantPickup ?? 0) >= 5 && input.elapsedTime >= this.config.buildUpAfterMs) intensity += 1;
 
-    if (!input.p1Alive || !input.p2Alive) intensity -= 2;
+    if (input.players.some((p) => !p.alive)) intensity -= 2;
 
-    const livingHealth = [input.p1Alive ? input.p1Health : null, input.p2Alive ? input.p2Health : null].filter(
-      (health): health is number => health !== null
-    );
+    const livingHealth = input.players.filter((p) => p.alive).map((p) => p.health);
     const averageHealth =
       livingHealth.length > 0 ? livingHealth.reduce((total, health) => total + health, 0) / livingHealth.length : 0;
 
@@ -293,7 +288,7 @@ export class GameDirector {
 
   private canSpawn(input: GameDirectorInput): boolean {
     const cooldown = this.getCurrentSpawnCooldownMs();
-    if (!input.p1Alive && !input.p2Alive) return false;
+    if (!input.players.some((p) => p.alive)) return false;
     if (this.state === 'CALM' || this.state === 'WATCHING' || this.state === 'WARNING' || this.state === 'RECOVERY') {
       this.lastDecisionReason = `${this.state.toLowerCase()} pause`;
       return false;
@@ -444,7 +439,7 @@ export class GameDirector {
       input.totalKills >= 1 ||
       input.elapsedTime >= 11_000 ||
       (input.enemiesAlive > 0 && input.enemiesAlive <= 2);
-    if (lowEnemyPressureEligible && input.enemiesAlive <= 2 && (input.p1Alive || input.p2Alive)) {
+    if (lowEnemyPressureEligible && input.enemiesAlive <= 2 && input.players.some((p) => p.alive)) {
       const burst = input.enemiesAlive === 0 ? 2.85 : 1;
       this.lowEnemyPressureAccumMs += deltaMs * burst * accumScale;
     } else if (input.enemiesAlive >= 4) {
@@ -514,9 +509,7 @@ export class GameDirector {
   }
 
   private getAverageLivingHealth(input: GameDirectorInput): number {
-    const livingHealth = [input.p1Alive ? input.p1Health : null, input.p2Alive ? input.p2Health : null].filter(
-      (health): health is number => health !== null
-    );
+    const livingHealth = input.players.filter((p) => p.alive).map((p) => p.health);
     return livingHealth.length > 0 ? livingHealth.reduce((total, health) => total + health, 0) / livingHealth.length : 0;
   }
 

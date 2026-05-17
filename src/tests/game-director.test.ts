@@ -5,18 +5,14 @@ const baseInput: GameDirectorInput = {
   elapsedTime: 0,
   totalKills: 0,
   enemiesAlive: 0,
-  p1Health: 100,
-  p2Health: 100,
-  p1Alive: true,
-  p2Alive: true,
+  players: [{ health: 100, alive: true }, { health: 100, alive: true }],
   currentWave: 1
 };
 
 describe('GameDirector', () => {
   const calmInput: GameDirectorInput = {
     ...baseInput,
-    p2Alive: false,
-    p2Health: 0,
+    players: [{ health: 100, alive: true }, { health: 0, alive: false }],
     currentWave: 0
   };
 
@@ -31,8 +27,7 @@ describe('GameDirector', () => {
       ...baseInput,
       elapsedTime: 60_000,
       totalKills: 6,
-      p1Health: 20,
-      p2Health: 25
+      players: [{ health: 20, alive: true }, { health: 25, alive: true }]
     });
 
     expect(weakIntensity).toBeLessThan(healthyIntensity);
@@ -91,8 +86,7 @@ describe('GameDirector', () => {
     const decision = director.update({
       ...baseInput,
       elapsedTime: 10_000,
-      p1Alive: false,
-      p2Alive: false
+      players: [{ health: 100, alive: false }, { health: 100, alive: false }]
     });
 
     expect(decision.intensity).toBe(0);
@@ -400,8 +394,7 @@ describe('GameDirector', () => {
     const decision = director.update({
       ...baseInput,
       elapsedTime: 20_000,
-      p1Health: 20,
-      p2Health: 25
+      players: [{ health: 20, alive: true }, { health: 25, alive: true }]
     });
 
     expect(decision.state).toBe('RECOVERY');
@@ -434,16 +427,14 @@ describe('GameDirector', () => {
       director.update({
         ...baseInput,
         elapsedTime: 20_000,
-        p1Health: 20,
-        p2Health: 25
+        players: [{ health: 20, alive: true }, { health: 25, alive: true }]
       }).state
     ).toBe('RECOVERY');
 
     const recovered = director.update({
       ...baseInput,
       elapsedTime: 21_200,
-      p1Health: 70,
-      p2Health: 70
+      players: [{ health: 70, alive: true }, { health: 70, alive: true }]
     });
 
     expect(recovered.state).toBe('CALM');
@@ -515,8 +506,7 @@ describe('GameDirector', () => {
       elapsedTime: 6000,
       enemiesAlive: 1,
       totalKills: 3,
-      p1Health: 28,
-      p2Health: 28
+      players: [{ health: 28, alive: true }, { health: 0, alive: false }]
     });
 
     expect(decision.state).toBe('RECOVERY');
