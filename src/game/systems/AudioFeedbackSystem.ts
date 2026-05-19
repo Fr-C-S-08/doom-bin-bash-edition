@@ -69,10 +69,10 @@ export const AUDIO_FEEDBACK_CONFIG: Record<AudioFeedbackCue, AudioFeedbackConfig
   },
   shootShotgun: {
     layers: [
-      { frequency: 118, endFrequency: 38, duration: 0.188, volume: 0.068, type: 'sawtooth' },
-      { frequency: 288, endFrequency: 92, duration: 0.112, volume: 0.028, type: 'square', delay: 0.003 },
-      { frequency: 72, endFrequency: 36, duration: 0.085, volume: 0.022, type: 'triangle', delay: 0.014 },
-      { frequency: 520, endFrequency: 180, duration: 0.04, volume: 0.009, type: 'triangle', delay: 0.022 }
+      { frequency: 92, endFrequency: 28, duration: 0.22, volume: 0.078, type: 'sawtooth' },
+      { frequency: 148, endFrequency: 42, duration: 0.168, volume: 0.052, type: 'triangle', delay: 0.004 },
+      { frequency: 288, endFrequency: 92, duration: 0.112, volume: 0.026, type: 'square', delay: 0.012 },
+      { frequency: 520, endFrequency: 180, duration: 0.04, volume: 0.009, type: 'triangle', delay: 0.028 }
     ]
   },
   shootLauncher: {
@@ -389,7 +389,12 @@ export class AudioFeedbackSystem {
     return this.masterVolume;
   }
 
-  play(cue: AudioFeedbackCue, intensity = 1, nowMs = performance.now(), opts?: { pitchMul?: number }): void {
+  play(
+    cue: AudioFeedbackCue,
+    intensity = 1,
+    nowMs = performance.now(),
+    opts?: { pitchMul?: number; lowFreqBoost?: number }
+  ): void {
     const context = this.getAudioContext();
     if (!context) return;
 
@@ -399,6 +404,7 @@ export class AudioFeedbackSystem {
 
     const pitchMul = opts?.pitchMul ?? 1;
     const pm = Number.isFinite(pitchMul) ? Math.max(0.82, Math.min(1.18, pitchMul)) : 1;
+    const lowBoost = Number.isFinite(opts?.lowFreqBoost) ? Math.max(0.85, Math.min(1.35, opts!.lowFreqBoost!)) : 1;
 
     try {
       void context.resume().catch(() => undefined);
@@ -407,7 +413,11 @@ export class AudioFeedbackSystem {
         const gain = context.createGain();
         const startTime = context.currentTime + (layer.delay ?? 0);
         const endTime = startTime + layer.duration;
-        const layerVolume = Math.max(0.0001, Math.min(0.065, layer.volume * intensity * this.masterVolume));
+        const isLowBand = layer.frequency < 320;
+        const layerVolume = Math.max(
+          0.0001,
+          Math.min(0.065, layer.volume * intensity * this.masterVolume * (isLowBand ? lowBoost : 1))
+        );
 
         oscillator.type = layer.type;
         const f0 = layer.frequency * pm;

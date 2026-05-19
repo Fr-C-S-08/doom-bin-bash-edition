@@ -60,6 +60,17 @@ export class WeaponSystem {
     return (this.reloadUntilByWeapon.get(kind) ?? 0) > time;
   }
 
+  /** 0 at reload start → 1 when reload completes (visual blend only). */
+  getReloadBlend(kind: WeaponKind = this.currentWeapon, time = Number.POSITIVE_INFINITY): number {
+    this.ensureWeaponState(kind);
+    const until = this.reloadUntilByWeapon.get(kind) ?? 0;
+    if (until <= time) return 0;
+    const reloadMs = getWeaponConfig(kind, this.profile).reloadMs;
+    if (reloadMs <= 0) return 0;
+    const remaining = until - time;
+    return Math.min(1, Math.max(0, 1 - remaining / reloadMs));
+  }
+
   startReload(time: number, kind: WeaponKind = this.currentWeapon): boolean {
     this.ensureWeaponState(kind);
     if (this.isReloading(kind, time)) return false;

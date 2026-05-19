@@ -5,6 +5,30 @@ import { castRay, isWallAt, type RaycastMap } from './RaycastMap';
 import type { RaycastEnemyProjectile } from './RaycastEnemySystem';
 import type { RaycastPlayerState } from './RaycastPlayerController';
 import { normalizeAngle } from './RaycastCombatSystem';
+import {
+  type BossVolleyKind,
+  type RaycastBossPlayerContext,
+  computeBossMovementIntent,
+  isBossDesperation,
+  isPlayerCornered,
+  isPlayerKitingBoss,
+  pickBossVolleyKind,
+  predictPlayerAimPoint
+} from './RaycastBossAI';
+
+export type { BossVolleyKind, RaycastBossPlayerContext } from './RaycastBossAI';
+export {
+  BOSS_DESPERATION_HP_RATIO,
+  BOSS_INTRO_DURATION_MS,
+  BOSS_PHASE3_SPEED_MUL,
+  getBossIntroCopy,
+  getDesperationPhaseLabel,
+  isBossDesperation,
+  isPlayerKitingBoss,
+  pickBossVolleyKind,
+  resolveBossMoveSpeed,
+  tickDualBossCoordination
+} from './RaycastBossAI';
 
 /** Original guardian — not derived from third-party games. */
 export const RAYCAST_BOSS_DISPLAY_NAME = 'Volt Archon';
@@ -56,6 +80,12 @@ export interface RaycastBossState {
   /** Telegraphed arena read — atmosphere / director hints only (no silent grid edits). */
   arenaTwist: RaycastBossArenaTwist;
   arenaTwistUntil: number;
+  lastVolleyKind: BossVolleyKind | 'none';
+  pendingVolleyKind: BossVolleyKind | 'none';
+  strafeSign: number;
+  strafeFlipAt: number;
+  cutAngleSign: number;
+  desperationAnnounced: boolean;
 }
 
 function telegraphMs(state: Pick<RaycastBossState, 'phase' | 'behavior'>): number {
@@ -71,19 +101,27 @@ function telegraphMs(state: Pick<RaycastBossState, 'phase' | 'behavior'>): numbe
   return 500;
 }
 
-function cooldownMs(state: Pick<RaycastBossState, 'phase' | 'behavior'>): number {
+function cooldownMs(state: Pick<RaycastBossState, 'phase' | 'behavior' | 'health' | 'maxHealth'>): number {
+  let ms: number;
   if (state.behavior === 'ash-judge') {
-    return state.phase === 1 ? 1680 : state.phase === 2 ? 1320 : 1040;
+    ms = state.phase === 1 ? 1680 : state.phase === 2 ? 1320 : 1040;
+  } else if (state.behavior === 'bloom-warden') {
+    ms = state.phase === 1 ? 1620 : state.phase === 2 ? 1280 : 980;
+  } else {
+    ms = state.phase === 1 ? 1780 : state.phase === 2 ? 1360 : 1020;
   }
-  if (state.behavior === 'bloom-warden') {
-    return state.phase === 1 ? 1620 : state.phase === 2 ? 1280 : 980;
-  }
-  if (state.phase === 1) return 1780;
-  if (state.phase === 2) return 1360;
-  return 1020;
+  if (isBossDesperation(state)) ms = Math.round(ms * 0.88);
+  return ms;
 }
 
-export function getRaycastBossPhaseLabel(boss: Pick<RaycastBossState, 'phase' | 'behavior'>): string {
+export function getRaycastBossPhaseLabel(
+  boss: Pick<RaycastBossState, 'phase' | 'behavior' | 'health' | 'maxHealth'>
+): string {
+  if (isBossDesperation(boss)) {
+    if (boss.behavior === 'ash-judge') return 'DESPERACIÓN // VEREDICTO FINAL';
+    if (boss.behavior === 'bloom-warden') return 'DESPERACIÓN // ENJAMBRE COLAPSANTE';
+    return 'DESPERACIÓN // SOBRECARGA TOTAL';
+  }
   if (boss.behavior === 'ash-judge') {
     if (boss.phase === 1) return 'FASE 1: AGUJAS DE CENIZA';
     if (boss.phase === 2) return 'FASE 2: HALO MERIDIANO // CORTE DIVIDIDO';
@@ -117,7 +155,13 @@ export function createRaycastBossState(config: RaycastBossConfig, time: number):
     hitFlashUntil: 0,
     alive: true,
     arenaTwist: 'none',
-    arenaTwistUntil: 0
+    arenaTwistUntil: 0,
+    lastVolleyKind: 'none',
+    pendingVolleyKind: 'none',
+    strafeSign: config.id.charCodeAt(0) % 2 === 0 ? -1 : 1,
+    strafeFlipAt: 0,
+    cutAngleSign: config.id.charCodeAt(config.id.length - 1) % 2 === 0 ? -1 : 1,
+    desperationAnnounced: false
   };
 }
 
@@ -352,106 +396,29 @@ function canOccupyBossSpace(map: RaycastMap, x: number, y: number, radius: numbe
 export function tickRaycastBossMovement(
   state: RaycastBossState,
   map: RaycastMap,
-  player: { x: number; y: number; alive: boolean },
+  player: RaycastBossPlayerContext,
   deltaMs: number,
   time: number
 ): void {
   if (!state.alive || !player.alive || deltaMs <= 0) return;
-  const toPlayerX = player.x - state.x;
-  const toPlayerY = player.y - state.y;
-  const distance = Math.hypot(toPlayerX, toPlayerY);
-  if (distance <= 0.001) return;
-  const ux = toPlayerX / distance;
-  const uy = toPlayerY / distance;
-  const strafeSign =
-    state.behavior === 'ash-judge'
-      ? Math.sin(time / 540) >= 0
-        ? 1
-        : -1
-      : state.behavior === 'bloom-warden'
-        ? Math.sin(time / 620) >= 0
-          ? 1
-          : -1
-        : Math.sin(time / 760) >= 0
-          ? 1
-          : -1;
-  const strafeX = -uy * strafeSign;
-  const strafeY = ux * strafeSign;
-
-  const preferredRange =
-    state.behavior === 'ash-judge'
-      ? state.phase === 1
-        ? 4.0
-        : state.phase === 2
-          ? 3.42
-          : 3.1
-      : state.behavior === 'bloom-warden'
-        ? state.phase === 1
-          ? 4.15
-          : state.phase === 2
-            ? 3.38
-            : 2.95
-        : state.phase === 1
-          ? 3.9
-          : state.phase === 2
-            ? 3.3
-            : 2.85;
-  const chaseWeight = distance > preferredRange ? 1 : 0.28;
-  const strafeWeight =
-    state.behavior === 'ash-judge'
-      ? state.phase === 3
-        ? 1.18
-        : state.phase === 2
-          ? 0.96
-          : 0.72
-      : state.behavior === 'bloom-warden'
-        ? state.phase === 3
-          ? 1.2
-          : state.phase === 2
-            ? 0.92
-            : 0.68
-        : state.phase === 3
-          ? 1.12
-          : state.phase === 2
-            ? 0.84
-            : 0.62;
   const telegraphSlow = time < state.telegraphUntil ? 0.45 : 1;
-  const speed =
-    (state.behavior === 'ash-judge'
-      ? state.phase === 3
-        ? 1.72
-        : state.phase === 2
-          ? 1.48
-          : 1.2
-      : state.behavior === 'bloom-warden'
-        ? state.phase === 3
-          ? 1.88
-          : state.phase === 2
-            ? 1.58
-            : 1.22
-        : state.phase === 3
-          ? 1.82
-          : state.phase === 2
-            ? 1.56
-            : 1.18) * telegraphSlow;
-  const step = (deltaMs / 1000) * speed;
-  const moveX = ux * chaseWeight + strafeX * strafeWeight;
-  const moveY = uy * chaseWeight + strafeY * strafeWeight;
-  const moveLen = Math.hypot(moveX, moveY) || 1;
-  const nx = state.x + (moveX / moveLen) * step;
-  const ny = state.y + (moveY / moveLen) * step;
+  const intent = computeBossMovementIntent(state, map, player, time, telegraphSlow);
+  if (intent.speed <= 0) return;
+  const step = (deltaMs / 1000) * intent.speed;
+  const nx = state.x + intent.moveX * step;
+  const ny = state.y + intent.moveY * step;
 
   if (canOccupyBossSpace(map, nx, ny, state.hitRadius + 0.1)) {
     state.x = nx;
     state.y = ny;
     return;
   }
-  const slideX = state.x + Math.sign(moveX) * step;
+  const slideX = state.x + Math.sign(intent.moveX) * step;
   if (canOccupyBossSpace(map, slideX, state.y, state.hitRadius + 0.1)) {
     state.x = slideX;
     return;
   }
-  const slideY = state.y + Math.sign(moveY) * step;
+  const slideY = state.y + Math.sign(intent.moveY) * step;
   if (canOccupyBossSpace(map, state.x, slideY, state.hitRadius + 0.1)) {
     state.y = slideY;
   }
@@ -466,10 +433,143 @@ function fanAngles(base: number, count: number, spread: number): number[] {
   return out;
 }
 
+function getBossPelletColor(state: Pick<RaycastBossState, 'behavior'>): number {
+  if (state.behavior === 'bloom-warden') return BLOOM_WARDEN_PROJECTILE_COLOR;
+  if (state.behavior === 'ash-judge') return ASH_JUDGE_PROJECTILE_COLOR;
+  return BOSS_PROJECTILE_COLOR;
+}
+
+function getBossProjectileDamage(state: Pick<RaycastBossState, 'phase' | 'health' | 'maxHealth'>): number {
+  const phaseDamageMul = state.phase === 3 ? PHASE_THREE_DAMAGE_MUL : state.phase === 2 ? PHASE_TWO_DAMAGE_MUL : 1;
+  const desperationMul = isBossDesperation(state) ? 1.08 : 1;
+  return Math.max(1, Math.round(BOSS_PROJECTILE_DAMAGE * phaseDamageMul * desperationMul));
+}
+
+function fireBossVolleyKind(
+  state: RaycastBossState,
+  kind: BossVolleyKind,
+  base: number,
+  playerStationary: boolean,
+  time: number,
+  pelletColor: number,
+  projectileDamage: number
+): RaycastEnemyProjectile[] {
+  const volley: RaycastEnemyProjectile[] = [];
+  const pushFan = (count: number, spread: number) => {
+    for (const a of fanAngles(base, count, spread)) {
+      volley.push(
+        spawnBossProjectile(state.x, state.y, state.x + Math.cos(a) * 3, state.y + Math.sin(a) * 3, time, pelletColor, projectileDamage)
+      );
+    }
+  };
+  const pushPerp = () => {
+    volley.push(
+      spawnBossProjectile(
+        state.x,
+        state.y,
+        state.x + Math.cos(base + Math.PI * 0.5) * 3,
+        state.y + Math.sin(base + Math.PI * 0.5) * 3,
+        time,
+        pelletColor,
+        projectileDamage
+      )
+    );
+    volley.push(
+      spawnBossProjectile(
+        state.x,
+        state.y,
+        state.x + Math.cos(base - Math.PI * 0.5) * 3,
+        state.y + Math.sin(base - Math.PI * 0.5) * 3,
+        time,
+        pelletColor,
+        projectileDamage
+      )
+    );
+  };
+
+  switch (kind) {
+    case 'twin_rails':
+      pushFan(2, 0.34);
+      break;
+    case 'fan':
+      pushFan(playerStationary ? 3 : 1, 0.22);
+      break;
+    case 'fan_wide':
+      pushFan(playerStationary ? 8 : 6, playerStationary ? 0.84 : 0.68);
+      break;
+    case 'bracket': {
+      pushFan(playerStationary ? 5 : 3, playerStationary ? 0.54 : 0.36);
+      const bracket = 0.52;
+      volley.push(
+        spawnBossProjectile(state.x, state.y, state.x + Math.cos(base - bracket) * 3, state.y + Math.sin(base - bracket) * 3, time, pelletColor, projectileDamage)
+      );
+      volley.push(
+        spawnBossProjectile(state.x, state.y, state.x + Math.cos(base + bracket) * 3, state.y + Math.sin(base + bracket) * 3, time, pelletColor, projectileDamage)
+      );
+      break;
+    }
+    case 'cross':
+      pushFan(playerStationary ? 6 : 4, playerStationary ? 0.58 : 0.42);
+      pushPerp();
+      break;
+    case 'mesh':
+      pushFan(playerStationary ? 7 : 5, playerStationary ? 0.82 : 0.62);
+      for (let i = 0; i < 4; i += 1) {
+        const a = (i * Math.PI) / 2 + time * 0.00085;
+        volley.push(spawnBossProjectile(state.x, state.y, state.x + Math.cos(a) * 3, state.y + Math.sin(a) * 3, time, pelletColor, projectileDamage));
+      }
+      break;
+    case 'spin': {
+      const spin = time * 0.00105;
+      const count = state.behavior === 'ash-judge' ? 3 : 4;
+      for (let i = 0; i < count; i += 1) {
+        const a = spin + (i * Math.PI * 2) / count;
+        volley.push(spawnBossProjectile(state.x, state.y, state.x + Math.cos(a) * 3, state.y + Math.sin(a) * 3, time, pelletColor, projectileDamage));
+      }
+      break;
+    }
+    case 'spin_quad': {
+      const spin = time * 0.00122;
+      for (let i = 0; i < 4; i += 1) {
+        const a = spin + (i * Math.PI * 2) / 4;
+        volley.push(spawnBossProjectile(state.x, state.y, state.x + Math.cos(a) * 3, state.y + Math.sin(a) * 3, time, pelletColor, projectileDamage));
+      }
+      break;
+    }
+    case 'cutoff':
+      pushFan(3, 0.28);
+      for (const a of fanAngles(base + Math.PI * 0.5, 2, 0.38)) {
+        volley.push(spawnBossProjectile(state.x, state.y, state.x + Math.cos(a) * 3, state.y + Math.sin(a) * 3, time, pelletColor, projectileDamage));
+      }
+      break;
+    case 'zone_deny':
+      for (let i = 0; i < 4; i += 1) {
+        const a = (i * Math.PI) / 2 + base * 0.18;
+        volley.push(spawnBossProjectile(state.x, state.y, state.x + Math.cos(a) * 3, state.y + Math.sin(a) * 3, time, pelletColor, projectileDamage));
+      }
+      pushFan(2, 0.24);
+      break;
+    case 'verdict_rush':
+      pushFan(playerStationary ? 5 : 4, 0.48);
+      for (const a of fanAngles(base + Math.PI, 2, 0.32)) {
+        volley.push(spawnBossProjectile(state.x, state.y, state.x + Math.cos(a) * 3, state.y + Math.sin(a) * 3, time, pelletColor, projectileDamage));
+      }
+      break;
+    default:
+      pushFan(playerStationary ? 7 : 5, playerStationary ? 0.92 : 0.68);
+      for (const a of fanAngles(base + Math.PI * 0.5, 3, 0.54)) {
+        volley.push(spawnBossProjectile(state.x, state.y, state.x + Math.cos(a) * 3, state.y + Math.sin(a) * 3, time, pelletColor, projectileDamage));
+      }
+      break;
+  }
+  return volley;
+}
+
 export function tickRaycastBossVolleys(
   state: RaycastBossState,
-  player: { x: number; y: number; alive: boolean; stationaryMs?: number },
-  time: number
+  player: RaycastBossPlayerContext,
+  time: number,
+  map: RaycastMap
 ): RaycastEnemyProjectile[] {
   if (!state.alive || !player.alive) return [];
 
@@ -478,148 +578,28 @@ export function tickRaycastBossVolleys(
     state.pendingVolleyAt = 0;
     state.telegraphUntil = 0;
 
-    const base = Math.atan2(player.y - state.y, player.x - state.x);
-    const volley: RaycastEnemyProjectile[] = [];
+    const aim = predictPlayerAimPoint(state, player, state.phase === 3 ? 0.2 : 0.14);
+    const base = Math.atan2(aim.y - state.y, aim.x - state.x);
     const playerStationary = (player.stationaryMs ?? 0) >= 1000;
-    const pelletColor =
-      state.behavior === 'bloom-warden'
-        ? BLOOM_WARDEN_PROJECTILE_COLOR
-        : state.behavior === 'ash-judge'
-          ? ASH_JUDGE_PROJECTILE_COLOR
-          : BOSS_PROJECTILE_COLOR;
-    const phaseDamageMul = state.phase === 3 ? PHASE_THREE_DAMAGE_MUL : state.phase === 2 ? PHASE_TWO_DAMAGE_MUL : 1;
-    const projectileDamage = Math.max(1, Math.round(BOSS_PROJECTILE_DAMAGE * phaseDamageMul));
-
-    if (state.behavior === 'ash-judge') {
-      if (state.phase === 1) {
-        const spin = time * 0.00105;
-        for (let i = 0; i < 3; i += 1) {
-          const a = spin + (i * Math.PI * 2) / 3;
-          volley.push(
-            spawnBossProjectile(state.x, state.y, state.x + Math.cos(a) * 3, state.y + Math.sin(a) * 3, time, pelletColor, projectileDamage)
-          );
-        }
-      } else if (state.phase === 2) {
-        const spread = playerStationary ? 0.58 : 0.42;
-        const fanCount = playerStationary ? 6 : 4;
-        for (const a of fanAngles(base, fanCount, spread)) {
-          volley.push(
-            spawnBossProjectile(state.x, state.y, state.x + Math.cos(a) * 3, state.y + Math.sin(a) * 3, time, pelletColor, projectileDamage)
-          );
-        }
-        volley.push(
-          spawnBossProjectile(
-            state.x,
-            state.y,
-            state.x + Math.cos(base + Math.PI * 0.5) * 3,
-            state.y + Math.sin(base + Math.PI * 0.5) * 3,
-            time,
-            pelletColor,
-            projectileDamage
-          )
-        );
-        volley.push(
-          spawnBossProjectile(
-            state.x,
-            state.y,
-            state.x + Math.cos(base - Math.PI * 0.5) * 3,
-            state.y + Math.sin(base - Math.PI * 0.5) * 3,
-            time,
-            pelletColor,
-            projectileDamage
-          )
-        );
-      } else {
-        const spread = playerStationary ? 0.84 : 0.7;
-        const fanCount = playerStationary ? 8 : 6;
-        for (const a of fanAngles(base, fanCount, spread)) {
-          volley.push(
-            spawnBossProjectile(state.x, state.y, state.x + Math.cos(a) * 3, state.y + Math.sin(a) * 3, time, pelletColor, projectileDamage)
-          );
-        }
-        const spin = time * 0.00122;
-        for (let i = 0; i < 4; i += 1) {
-          const a = spin + (i * Math.PI * 2) / 4;
-          volley.push(
-            spawnBossProjectile(state.x, state.y, state.x + Math.cos(a) * 3, state.y + Math.sin(a) * 3, time, pelletColor, projectileDamage)
-          );
-        }
-      }
-      return volley;
-    }
-
-    if (state.behavior === 'bloom-warden') {
-      if (state.phase === 1) {
-        for (const a of fanAngles(base, 2, 0.34)) {
-          volley.push(spawnBossProjectile(state.x, state.y, state.x + Math.cos(a) * 3, state.y + Math.sin(a) * 3, time, pelletColor));
-        }
-      } else if (state.phase === 2) {
-        const spread = playerStationary ? 0.52 : 0.38;
-        const fanCount = playerStationary ? 6 : 4;
-        for (const a of fanAngles(base, fanCount, spread)) {
-          volley.push(spawnBossProjectile(state.x, state.y, state.x + Math.cos(a) * 3, state.y + Math.sin(a) * 3, time, pelletColor));
-        }
-        volley.push(spawnBossProjectile(state.x, state.y, state.x + Math.cos(base + Math.PI * 0.5) * 3, state.y + Math.sin(base + Math.PI * 0.5) * 3, time, pelletColor));
-        volley.push(spawnBossProjectile(state.x, state.y, state.x + Math.cos(base - Math.PI * 0.5) * 3, state.y + Math.sin(base - Math.PI * 0.5) * 3, time, pelletColor));
-      } else {
-        const spread = playerStationary ? 0.82 : 0.62;
-        const fanCount = playerStationary ? 7 : 5;
-        for (const a of fanAngles(base, fanCount, spread)) {
-          volley.push(spawnBossProjectile(state.x, state.y, state.x + Math.cos(a) * 3, state.y + Math.sin(a) * 3, time, pelletColor));
-        }
-        for (let i = 0; i < 4; i += 1) {
-          const a = (i * Math.PI) / 2 + time * 0.00085;
-          volley.push(spawnBossProjectile(state.x, state.y, state.x + Math.cos(a) * 3, state.y + Math.sin(a) * 3, time, pelletColor));
-        }
-      }
-      return volley;
-    }
-
-    if (state.phase === 1) {
-      const count = playerStationary ? 3 : 1;
-      for (const a of fanAngles(base, count, 0.22)) {
-        volley.push(spawnBossProjectile(state.x, state.y, state.x + Math.cos(a) * 3, state.y + Math.sin(a) * 3, time, pelletColor));
-      }
-    } else if (state.phase === 2) {
-      /** Phase 2: fan + fixed “ion bracket” rails — same damage/speed, forces lateral cut vs hugging center. */
-      const count = playerStationary ? 5 : 3;
-      for (const a of fanAngles(base, count, playerStationary ? 0.54 : 0.36)) {
-        volley.push(spawnBossProjectile(state.x, state.y, state.x + Math.cos(a) * 3, state.y + Math.sin(a) * 3, time, pelletColor));
-      }
-      const bracket = 0.52;
-      volley.push(
-        spawnBossProjectile(
-          state.x,
-          state.y,
-          state.x + Math.cos(base - bracket) * 3,
-          state.y + Math.sin(base - bracket) * 3,
-          time,
-          pelletColor
-        )
-      );
-      volley.push(
-        spawnBossProjectile(
-          state.x,
-          state.y,
-          state.x + Math.cos(base + bracket) * 3,
-          state.y + Math.sin(base + bracket) * 3,
-          time,
-          pelletColor
-        )
-      );
-    } else {
-      const count = playerStationary ? 7 : 5;
-      for (const a of fanAngles(base, count, playerStationary ? 0.92 : 0.68)) {
-        volley.push(spawnBossProjectile(state.x, state.y, state.x + Math.cos(a) * 3, state.y + Math.sin(a) * 3, time, pelletColor));
-      }
-      for (const a of fanAngles(base + Math.PI * 0.5, 3, 0.54)) {
-        volley.push(spawnBossProjectile(state.x, state.y, state.x + Math.cos(a) * 3, state.y + Math.sin(a) * 3, time, pelletColor));
-      }
-    }
-    return volley;
+    const pelletColor = getBossPelletColor(state);
+    const projectileDamage = getBossProjectileDamage(state);
+    const kind = state.pendingVolleyKind === 'none' ? 'fan' : state.pendingVolleyKind;
+    state.lastVolleyKind = kind;
+    state.pendingVolleyKind = 'none';
+    return fireBossVolleyKind(state, kind, base, playerStationary, time, pelletColor, projectileDamage);
   }
 
   if (time >= state.nextVolleyReadyAt) {
+    const distance = Math.hypot(player.x - state.x, player.y - state.y);
+    const pickCtx = {
+      distance,
+      playerStationary: (player.stationaryMs ?? 0) >= 1000,
+      playerKiting: isPlayerKitingBoss(state, player),
+      playerCornered: isPlayerCornered(map, player),
+      desperation: isBossDesperation(state),
+      timeSinceLastVolleyMs: Math.max(0, time - (state.nextVolleyReadyAt - cooldownMs(state)))
+    };
+    state.pendingVolleyKind = pickBossVolleyKind(state, pickCtx);
     state.telegraphUntil = time + telegraphMs(state);
     state.pendingVolleyAt = state.telegraphUntil;
     state.nextVolleyReadyAt = state.pendingVolleyAt + cooldownMs(state);

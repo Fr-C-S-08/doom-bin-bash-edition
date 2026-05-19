@@ -32,11 +32,18 @@ import { RAYCAST_LEVEL, type RaycastLevel } from "./RaycastLevel";
 import { RAYCAST_RENDERER_CONFIG } from "./RaycastRendererConfig";
 import { RAYCAST_PALETTE } from "./RaycastPalette";
 import {
-  RAYCAST_DEATH_BURST_MS,
-  RAYCAST_HIT_FLASH_MS,
-} from "./RaycastCombatSystem";
+  RAYCAST_CORPSE_FADE_MS,
+  getCorpseFadeAlpha,
+  getEnemyFlinchScreenOffset,
+  type WeaponViewFeel,
+} from "./RaycastCombatFeel";
+import { RAYCAST_DEATH_BURST_MS } from "./RaycastCombatSystem";
 import type { RaycastBossState } from "./RaycastBoss";
 import { getRaycastBossVisualProfile } from "./RaycastBossVisual";
+import {
+  getRaycastEnemyIdentity,
+  RAYCAST_ENEMY_READABILITY,
+} from "./RaycastEnemyIdentity";
 import {
   getBillboardColor,
   getRaycastCellVariant,
@@ -233,18 +240,19 @@ export class RaycastRenderer {
       if (!didDrawWallTexture) {
         this.graphics.fillStyle(color, 1);
         this.graphics.fillRect(x, y, wallColumnWidth, wallHeight);
-        this.drawWallPattern(
-          hit.wallType,
-          column,
-          x,
-          y,
-          wallColumnWidth,
-          wallHeight,
-          shade,
-          atmosphere,
-          surface,
-        );
       }
+
+      this.drawWallPattern(
+        hit.wallType,
+        column,
+        x,
+        y,
+        wallColumnWidth,
+        wallHeight,
+        shade,
+        atmosphere,
+        surface,
+      );
 
       //this.drawWallColumnVolume(
         //hit,
@@ -276,7 +284,8 @@ export class RaycastRenderer {
     let n = 0;
     for (let i = 0; i < enemies.length; i += 1) {
       const enemy = enemies[i];
-      if (!enemy.alive && enemy.deathBurstUntil <= time) continue;
+      if (!enemy.alive && time > enemy.deathBurstUntil + RAYCAST_CORPSE_FADE_MS)
+        continue;
       if (
         this.fillEnemyProjection(
           player,
@@ -320,24 +329,29 @@ export class RaycastRenderer {
         );
 
         if (!didDrawDefeatedSprite) {
-          this.drawEnemyDeathBurst(projection, height, time, atmosphere);
+          if (time <= projection.enemy.deathBurstUntil) {
+            this.drawEnemyDeathBurst(
+              projection,
+              height,
+              time,
+              atmosphere,
+              projection.enemy.kind === 'BRUTE' || projection.enemy.maxHealth >= 80
+            );
+          } else {
+            this.drawEnemyCorpseFade(projection, height, time, atmosphere);
+          }
         }
-
         continue;
       }
 
-      const hitStaggerX =
-        projection.enemy.hitFlashUntil > time
-          ? Math.sin(time * 0.11) *
-            projection.size *
-            0.12 *
-            Math.min(
-              1,
-              (projection.enemy.hitFlashUntil - time) / RAYCAST_HIT_FLASH_MS,
-            )
-          : 0;
+      const hitStaggerX = getEnemyFlinchScreenOffset(
+        projection.enemy,
+        projection.size,
+        time,
+      );
 
       if (isRaycastEnemyTelegraphing(projection.enemy, time)) {
+        const spawnIdentity = getRaycastEnemyIdentity(projection.enemy.kind);
         const progress = getRaycastEnemySpawnTelegraphProgress(
           projection.enemy,
           time,
@@ -364,11 +378,11 @@ export class RaycastRenderer {
           projection.size * 1.4,
         );
         this.graphics.fillStyle(
-          RAYCAST_PALETTE.telegraphRose,
+          spawnIdentity.telegraphColor,
           0.16 * visibility + progress * 0.08,
         );
         this.graphics.fillCircle(tx, height * 0.5, haloRadius);
-        this.graphics.lineStyle(4, RAYCAST_PALETTE.telegraphAmber, alpha);
+        this.graphics.lineStyle(4, spawnIdentity.telegraphColor, alpha);
         this.graphics.strokeCircle(tx, height * 0.5, markerRadius);
         this.graphics.lineStyle(
           2,
@@ -388,7 +402,7 @@ export class RaycastRenderer {
           height * 0.5 + projection.size * 0.36,
         );
         this.graphics.fillStyle(
-          RAYCAST_PALETTE.amberSoft,
+          spawnIdentity.windupColor,
           (0.55 + pulse * 0.16) * visibility,
         );
         this.graphics.fillRect(
@@ -397,10 +411,7 @@ export class RaycastRenderer {
           projection.size * 0.4,
           5,
         );
-        this.graphics.fillStyle(
-          RAYCAST_PALETTE.telegraphRose,
-          0.78 * visibility,
-        );
+        this.graphics.fillStyle(spawnIdentity.identityColor, 0.78 * visibility);
         this.graphics.fillRect(
           tx - projection.size * 0.28,
           height * 0.5 - projection.size * 0.52,
@@ -473,6 +484,11 @@ export class RaycastRenderer {
           size * 1.38,
           size * 1.46,
         );
+      }
+      if (projection.enemy.variant === 'ELITE') {
+        const eliteRing = size * RAYCAST_ENEMY_READABILITY.eliteAuraScale;
+        this.graphics.lineStyle(2, projection.enemy.variantAccentColor ?? 0xffe39c, RAYCAST_ENEMY_READABILITY.eliteAuraAlpha * visibility);
+        this.graphics.strokeEllipse(sx, height * 0.5 + size * 0.08, eliteRing, eliteRing * 1.04);
       }
       if (isWindingUp) {
         this.graphics.fillStyle(
@@ -860,6 +876,7 @@ export class RaycastRenderer {
 
     this.preparedWeaponTextureKeys.add(textureKey);
   }
+
   private getWeaponTextureKey(weapon: WeaponKind): string | null {
     switch (weapon) {
       case "PISTOL":
@@ -878,11 +895,31 @@ export class RaycastRenderer {
     width: number,
     height: number,
     muzzleAlpha: number,
+    viewFeel: WeaponViewFeel = {
+      offsetX: 0,
+      offsetY: 0,
+      tiltRad: 0,
+      swayX: 0,
+      swayY: 0,
+      bobX: 0,
+      bobY: 0,
+      reloadDrop: 0,
+      switchBlend: 0,
+      shellPhase: 0,
+      recoilKick: muzzleAlpha,
+    },
   ): void {
-    const kick = Phaser.Math.Clamp(muzzleAlpha, 0, 1);
+    const kick = Phaser.Math.Clamp(
+      Math.max(muzzleAlpha, viewFeel.recoilKick),
+      0,
+      1,
+    );
     const { x: recoilX, y: recoilY } = this.weaponRecoilOffset(weapon, kick);
-    const baseY = height - 18 + recoilY;
-    const cx = width * 0.5 + recoilX;
+    const baseY = height - 18 + recoilY + viewFeel.offsetY + viewFeel.bobY;
+    const cx = width * 0.5 + recoilX + viewFeel.offsetX + viewFeel.swayX;
+    const tilt = viewFeel.tiltRad;
+    const switchDim = 1 - viewFeel.switchBlend * 0.38;
+    const tiltSkew = (yOff: number): number => cx + Math.sin(tilt) * (baseY - yOff) * 0.08;
     const weaponTextureKey = this.getWeaponTextureKey(weapon);
     const hasWeaponSprite =
       weaponTextureKey !== null &&
@@ -896,17 +933,18 @@ export class RaycastRenderer {
           : weapon === "LAUNCHER"
             ? width * 0.34
             : width * 0.28;
-
       const kickScale = 1 + kick * 0.035;
 
       this.weaponSprite
         .setTexture(weaponTextureKey)
         .setBlendMode(Phaser.BlendModes.NORMAL)
         .setVisible(true)
-        .setAlpha(1)
+        .setAlpha(switchDim)
         .setPosition(
           cx,
-          weapon === "PISTOL" ? height + 78 + recoilY : height + 18 + recoilY,
+          weapon === "PISTOL"
+            ? height + 78 + recoilY + viewFeel.bobY
+            : height + 18 + recoilY + viewFeel.bobY,
         )
         .setDisplaySize(displaySize * kickScale, displaySize * kickScale)
         .setDepth(9);
@@ -931,8 +969,8 @@ export class RaycastRenderer {
     const corruptGlow = RAYCAST_PALETTE.telegraphRose;
 
     if (weapon === "PISTOL") {
-      this.graphics.fillStyle(0x010306, 0.55);
-      this.graphics.fillEllipse(cx + 6, baseY - 48, 52, 72);
+      this.graphics.fillStyle(0x010306, 0.55 * switchDim);
+      this.graphics.fillEllipse(tiltSkew(baseY - 48) + 6, baseY - 48, 52, 72);
       this.graphics.fillStyle(0x020408, 0.72);
       this.graphics.fillRect(cx - 44, baseY - 78, 88, 84);
       this.graphics.fillGradientStyle(
@@ -989,6 +1027,7 @@ export class RaycastRenderer {
         cx - 18,
         baseY - 8,
       );
+      this.drawShellEjection(weapon, cx, baseY, viewFeel.shellPhase, switchDim);
     } else if (weapon === "SHOTGUN") {
       this.graphics.fillStyle(0x010306, 0.58);
       this.graphics.fillEllipse(cx + 14, baseY - 50, 108, 78);
@@ -1044,6 +1083,7 @@ export class RaycastRenderer {
         cx,
         baseY - 6,
       );
+      this.drawShellEjection(weapon, cx, baseY, viewFeel.shellPhase, switchDim);
     } else {
       this.graphics.fillStyle(0x010306, 0.6);
       this.graphics.fillEllipse(cx + 10, baseY - 54, 96, 88);
@@ -1101,6 +1141,11 @@ export class RaycastRenderer {
       }
       this.graphics.fillStyle(0x0a1014, 0.7);
       this.graphics.fillRect(cx - 22, baseY - 24, 44, 10);
+    }
+
+    if (viewFeel.reloadDrop > 2) {
+      this.graphics.fillStyle(trimColor, 0.22 * switchDim);
+      this.graphics.fillRect(cx - 28, baseY - 8, 56, 4);
     }
 
     if (kick <= 0) return;
@@ -2139,24 +2184,67 @@ private sampleWallTextureColor(
     }
   }
 
-  private drawEnemyDeathBurst(
+  private drawShellEjection(weapon: WeaponKind, cx: number, baseY: number, shellPhase: number, dim: number): void {
+    if (shellPhase <= 0.02 || weapon === 'LAUNCHER') return;
+    const eject = 1 - shellPhase;
+    const shellX = cx + (weapon === 'SHOTGUN' ? 54 : 28) + eject * 26;
+    const shellY = baseY - (weapon === 'SHOTGUN' ? 96 : 108) - eject * 18;
+    const shellColor = weapon === 'SHOTGUN' ? 0xc48a3a : 0xb8a060;
+    this.graphics.fillStyle(shellColor, 0.88 * dim * shellPhase);
+    this.graphics.fillRoundedRect(shellX - 3, shellY - 8, 6, 12, 2);
+    this.graphics.fillStyle(0xfff0c2, 0.35 * dim * shellPhase);
+    this.graphics.fillRect(shellX - 1, shellY - 6, 2, 4);
+  }
+
+  private drawEnemyCorpseFade(
     projection: EnemyProjection,
     height: number,
     time: number,
     atmosphere: RaycastAtmosphereRenderOptions,
   ): void {
+    const alpha = getCorpseFadeAlpha(projection.enemy, time);
+    if (alpha <= 0.01) return;
+    const visibility = calculateEnemyVisibility(projection.distance, atmosphere);
+    const cx = projection.screenX;
+    const cy = height * 0.5;
+    const size = projection.size * 0.82;
+    const ash = 0x2a2420;
+    this.graphics.fillStyle(ash, alpha * 0.42 * visibility);
+    this.graphics.fillEllipse(cx, cy + size * 0.12, size * 1.1, size * 0.42);
+    this.graphics.fillStyle(projection.enemy.color, alpha * 0.28 * visibility);
+    this.graphics.fillCircle(cx, cy, size * 0.36);
+    this.graphics.lineStyle(1, 0x6a5a52, alpha * 0.35 * visibility);
+    this.graphics.strokeEllipse(cx, cy + size * 0.1, size * 0.9, size * 0.28);
+  }
+
+  private drawEnemyDeathBurst(
+    projection: EnemyProjection,
+    height: number,
+    time: number,
+    atmosphere: RaycastAtmosphereRenderOptions,
+    isBoss: boolean
+  ): void {
     const remaining = Math.max(0, projection.enemy.deathBurstUntil - time);
-    const burstDuration = Math.max(1, RAYCAST_DEATH_BURST_MS);
+    const burstDuration = Math.max(1, projection.enemy.deathBurstUntil > 0 ? RAYCAST_DEATH_BURST_MS : RAYCAST_DEATH_BURST_MS);
     const alpha = Phaser.Math.Clamp(remaining / burstDuration, 0, 1);
     const visibility = calculateEnemyVisibility(
       projection.distance,
       atmosphere,
     );
-    const burstSize = projection.size * (1.28 + (1 - alpha) * 0.92);
+    const scaleMul = isBoss ? 1.48 : 1.22;
+    const burstSize =
+      projection.size * scaleMul * (1.28 + (1 - alpha) * 0.92);
     const shard = 1 - alpha;
     const cx = projection.screenX;
     const cy = height * 0.5;
 
+    this.graphics.fillStyle(0x3a3430, alpha * 0.22 * visibility * shard);
+    this.graphics.fillEllipse(
+      cx,
+      cy + burstSize * 0.08,
+      burstSize * 0.72,
+      burstSize * 0.28,
+    );
     this.graphics.fillStyle(
       0xfff8f0,
       alpha * 0.34 * visibility * (0.25 + shard * 0.75),
