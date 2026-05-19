@@ -229,20 +229,6 @@ export class MenuScene extends Phaser.Scene {
     const footerFontSize = shortFooter ? '9px' : '10px';
 
     this.add
-      .text(layout.centerX, layout.footerCreditY, copy.footerCredit, {
-        fontFamily: 'monospace',
-        fontSize: footerFontSize,
-        fontStyle: '700',
-        color: '#6d7d90',
-        align: 'center',
-        letterSpacing: 0.6,
-        wordWrap: { width: layout.footerMaxWidth }
-      })
-      .setOrigin(0.5, 1)
-      .setDepth(8)
-      .setAlpha(0.78);
-
-    this.add
       .text(layout.centerX, layout.footerHintsY, copy.footerInputHints, {
         fontFamily: 'monospace',
         fontSize: footerFontSize,

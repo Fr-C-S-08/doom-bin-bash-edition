@@ -90,7 +90,6 @@ export interface MainMenuLayout {
   settingsY: number;
   /** Center Y for the decorative frame behind the title */
   titleFrameCenterY: number;
-  footerCreditY: number;
   footerHintsY: number;
   footerMaxWidth: number;
 }
@@ -340,7 +339,6 @@ export function buildMainMenuLayout(width: number, height: number): MainMenuLayo
   const titleFrameCenterY = titleY - Math.round(titleToFirstLine * 0.2);
   const safeBottomPad = shortViewport ? 22 : 28;
   const footerHintsY = Math.max(24, height - safeBottomPad);
-  const footerCreditY = footerHintsY - (shortViewport ? 14 : 16);
   const footerMaxWidth = Math.max(220, Math.min(width - 40, shortViewport ? width - 48 : 760));
 
   return {
@@ -351,7 +349,6 @@ export function buildMainMenuLayout(width: number, height: number): MainMenuLayo
     difficultyY,
     settingsY,
     titleFrameCenterY,
-    footerCreditY,
     footerHintsY,
     footerMaxWidth
   };

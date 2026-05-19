@@ -306,7 +306,6 @@ describe('raycast presentation helpers', () => {
     expect(layout.option3dY).toBeLessThan(layout.difficultyY);
     expect(layout.difficultyY).toBeLessThan(layout.settingsY);
     expect(layout.titleFrameCenterY).toBeLessThan(layout.titleY);
-    expect(layout.footerCreditY).toBeLessThan(layout.footerHintsY);
     expect(layout.footerHintsY).toBeGreaterThan(0);
     expect(layout.footerMaxWidth).toBeGreaterThan(200);
   });
@@ -322,8 +321,7 @@ describe('raycast presentation helpers', () => {
     for (const { width, height } of layouts) {
       const layout = buildMainMenuLayout(width, height);
       expect(layout.titleY).toBeLessThan(layout.option3dY);
-      expect(layout.settingsY).toBeLessThan(layout.footerCreditY);
-      expect(layout.footerCreditY).toBeLessThan(layout.footerHintsY);
+      expect(layout.settingsY).toBeLessThan(layout.footerHintsY);
       expect(layout.footerHintsY).toBeLessThanOrEqual(height - 20);
       expect(layout.footerMaxWidth).toBeLessThanOrEqual(width - 40);
     }
