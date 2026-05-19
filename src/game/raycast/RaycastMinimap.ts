@@ -1,4 +1,5 @@
 import type { EnemyKind } from '../types/game';
+import { getRaycastEnemyIdentity } from './RaycastEnemyIdentity';
 import { getRaycastDoorRequiredKeyIds, type RaycastLevel } from './RaycastLevel';
 import { RAYCAST_TILE, type RaycastMap } from './RaycastMap';
 
@@ -200,10 +201,13 @@ function buildZoneTag(zoneId: string): string {
 
 /** Red-family markers for minimap differentiation (enemy dots). */
 export function getRaycastMinimapEnemyDotStyle(kind: EnemyKind): { fill: number; radiusMul: number; ring: number } {
-  if (kind === 'BRUTE') return { fill: 0xffa64d, radiusMul: 1.35, ring: 0xffd090 };
-  if (kind === 'STALKER') return { fill: 0x54e898, radiusMul: 0.82, ring: 0xa8f0c8 };
-  if (kind === 'RANGED') return { fill: 0x5cefef, radiusMul: 1.0, ring: 0x9ffbff };
-  if (kind === 'SCRAMBLER') return { fill: 0xff8844, radiusMul: 0.88, ring: 0xffc090 };
-  if (kind === 'FLASHER') return { fill: 0xb86dff, radiusMul: 0.96, ring: 0xe0c5ff };
-  return { fill: 0xff5c42, radiusMul: 0.92, ring: 0xff9a80 };
+  const identity = getRaycastEnemyIdentity(kind);
+  const fill = identity.identityColor;
+  const ring = identity.telegraphColor;
+  if (kind === 'BRUTE') return { fill, radiusMul: 1.35, ring };
+  if (kind === 'STALKER') return { fill, radiusMul: 0.82, ring };
+  if (kind === 'RANGED') return { fill, radiusMul: 1.0, ring };
+  if (kind === 'SCRAMBLER') return { fill, radiusMul: 0.88, ring };
+  if (kind === 'FLASHER') return { fill, radiusMul: 0.96, ring };
+  return { fill, radiusMul: 0.92, ring };
 }

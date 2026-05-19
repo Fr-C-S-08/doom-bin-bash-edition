@@ -1,3 +1,4 @@
+import { getGameSaveStorage } from '../save/SaveManager';
 import type { RaycastCampaignMetrics } from './RaycastScore';
 
 export const RAYCAST_PLAYTEST_TELEMETRY_STORAGE_KEY = 'raycast_playtest_telemetry_v1';
@@ -30,8 +31,7 @@ type MinimalStorage = Pick<Storage, 'getItem' | 'setItem'>;
 
 function defaultStorage(): MinimalStorage | null {
   try {
-    if (typeof localStorage === 'undefined') return null;
-    return localStorage;
+    return getGameSaveStorage();
   } catch {
     return null;
   }

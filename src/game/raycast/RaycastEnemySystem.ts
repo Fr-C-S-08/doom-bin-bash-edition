@@ -1,9 +1,10 @@
 import { getEnemyConfig } from '../entities/enemyConfig';
-import { decideEnemyBehavior, getDirection } from '../systems/EnemyBehaviorSystem';
+import { getDirection } from '../systems/EnemyBehaviorSystem';
 import type { MovementVector } from '../systems/MovementSystem';
+import { decayEnemyFlinch } from './RaycastCombatFeel';
 import { castRay, type RaycastMap } from './RaycastMap';
 import { collides } from './RaycastMovement';
-import { isRaycastEnemyTelegraphing, type RaycastEnemy } from './RaycastEnemy';
+import { isRaycastEnemyTelegraphing, type RaycastEnemy, type RaycastPlayerTarget } from './RaycastEnemy';
 import {
   RAYCAST_ALERT_AFTER_LOSS_MS,
   RAYCAST_ALERT_ARRIVE_EPSILON,
@@ -19,6 +20,16 @@ import {
   RAYCAST_ROAM_REDIRECT_VAR_MS,
   RAYCAST_ROAM_STUCK_THRESHOLD_MS
 } from './RaycastEnemyRoam';
+import {
+  accumulateTacticalStuck,
+  computeTacticalMoveDirection,
+  decideRaycastEnemyBehavior,
+  getRaycastTacticProfile,
+  isRaycastMemoryActive,
+  markRaycastPlayerSeen,
+  notifyRaycastEnemyDamaged,
+  notifyRaycastGunfire
+} from './RaycastEnemyTactics';
 
 const GRID_SCALE = 100;
 /** Hearing radius as a fraction of detection (grid units); no LOS required. */
@@ -45,11 +56,7 @@ export interface RaycastEnemyUpdateResult {
   flashActivations: { enemyId: string; baseDurationMs: number }[];
 }
 
-export interface RaycastPlayerTarget {
-  x: number;
-  y: number;
-  alive: boolean;
-}
+export type { RaycastPlayerTarget } from './RaycastEnemy';
 
 export interface RaycastEnemyRuntimeModifiers {
   speedMultiplier?: number;
@@ -75,6 +82,8 @@ function createEnemySaltedRng(enemyId: string, salt: number): () => number {
   };
 }
 
+export { notifyRaycastEnemyDamaged, notifyRaycastGunfire };
+
 export function updateRaycastEnemies(
   map: RaycastMap,
   enemies: RaycastEnemy[],
@@ -87,7 +96,9 @@ export function updateRaycastEnemies(
   const spawnedProjectiles: RaycastEnemyProjectile[] = [];
   const flashActivations: { enemyId: string; baseDurationMs: number }[] = [];
 
+  const deltaSeconds = deltaMs / 1000;
   enemies.forEach((enemy) => {
+    decayEnemyFlinch(enemy, deltaSeconds);
     if (!enemy.alive || !player.alive) return;
     if (isRaycastEnemyTelegraphing(enemy, time)) return;
     if ((enemy.staggerUntil ?? 0) > time) {
@@ -101,6 +112,7 @@ export function updateRaycastEnemies(
     }
 
     const config = getEnemyConfig(enemy.kind, 'raycast');
+    const profile = getRaycastTacticProfile(enemy.kind);
     const distance = Math.hypot(player.x - enemy.x, player.y - enemy.y);
     const hasSight = hasLineOfSight(map, enemy, player);
 
@@ -123,21 +135,20 @@ export function updateRaycastEnemies(
         flashActivations.push({ enemyId: enemy.id, baseDurationMs: 1000 });
       }
     }
-    let decision = decideEnemyBehavior({
-      distanceToTarget: distance * GRID_SCALE,
-      enemyAlive: enemy.alive,
-      targetAlive: player.alive && aware,
-      config
-    });
+
+    let decision = decideRaycastEnemyBehavior(distance, enemy.alive, player.alive && aware, config, profile);
 
     if (decision.action === 'RANGED_ATTACK' && !hasSight) {
       decision = { action: 'CHASE', speedMultiplier: 0.82 };
     }
 
     if (decision.action !== 'IDLE') {
+      markRaycastPlayerSeen(enemy, player, time);
+    } else if (isRaycastMemoryActive(enemy, time) || time < enemy.alertUntilTime) {
       enemy.lastKnownPlayerX = player.x;
       enemy.lastKnownPlayerY = player.y;
     }
+
     if (enemy.wasCombatActiveLastTick && decision.action === 'IDLE') {
       enemy.alertUntilTime = time + RAYCAST_ALERT_AFTER_LOSS_MS;
     }
@@ -147,10 +158,11 @@ export function updateRaycastEnemies(
       enemy.attackWindupStartedAt = 0;
       enemy.attackWindupUntil = 0;
 
-      if (time < enemy.alertUntilTime) {
+      if (time < enemy.alertUntilTime || isRaycastMemoryActive(enemy, time)) {
         const distLK = Math.hypot(enemy.lastKnownPlayerX - enemy.x, enemy.lastKnownPlayerY - enemy.y);
         if (distLK < RAYCAST_ALERT_ARRIVE_EPSILON) {
           enemy.alertUntilTime = 0;
+          enemy.lastSeenPlayerAt = 0;
         } else {
           const alertSpeed = (config.speed / GRID_SCALE) * 0.5;
           const alertSteer = pickOpenRoamHeadingToward(
@@ -223,28 +235,31 @@ export function updateRaycastEnemies(
       return;
     }
 
-    if (decision.action === 'CHASE') {
+    if (decision.action === 'CHASE' || decision.action === 'RETREAT') {
       enemy.attackWindupStartedAt = 0;
       enemy.attackWindupUntil = 0;
+      const beforeX = enemy.x;
+      const beforeY = enemy.y;
+      const steer = computeTacticalMoveDirection({
+        enemy,
+        enemies,
+        player,
+        map,
+        config,
+        profile,
+        decision,
+        time,
+        deltaMs
+      });
       moveEnemy(
         map,
         enemy,
-        getDirection(enemy, player),
+        steer,
         (config.speed / GRID_SCALE) * decision.speedMultiplier * (modifiers.speedMultiplier ?? 1) * (enemy.speedMultiplier ?? 1),
         deltaMs
       );
-    }
-
-    if (decision.action === 'RETREAT') {
-      enemy.attackWindupStartedAt = 0;
-      enemy.attackWindupUntil = 0;
-      moveEnemy(
-        map,
-        enemy,
-        getDirection(player, enemy),
-        (config.speed / GRID_SCALE) * decision.speedMultiplier * (modifiers.speedMultiplier ?? 1) * (enemy.speedMultiplier ?? 1),
-        deltaMs
-      );
+      const moved = Math.hypot(enemy.x - beforeX, enemy.y - beforeY);
+      enemy.tacticalStuckMs = accumulateTacticalStuck(moved, deltaMs, enemy.tacticalStuckMs);
     }
 
     if (decision.action === 'MELEE_ATTACK' && canAttack(enemy, time)) {

@@ -201,9 +201,9 @@ describe('raycast visual theme', () => {
       hornStyle: 'antenna'
     });
     expect(scramblerStyle).toMatchObject({
-      silhouette: 'raider',
-      role: 'flanker',
-      hornStyle: 'glitch-spikes'
+      silhouette: 'sentinel',
+      role: 'artillery',
+      hornStyle: 'antenna'
     });
     expect(bruteStyle.coreColor).not.toBe(gruntStyle.coreColor);
     expect(stalkerStyle.windupColor).not.toBe(rangedStyle.windupColor);

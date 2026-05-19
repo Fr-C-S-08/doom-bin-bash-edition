@@ -1,8 +1,11 @@
+import { formatRaycastActiveInputLine, formatRaycastControlsHelpBlock, type RaycastActiveInputKind } from './RaycastInputHelp';
+
 /** Pause menu labels shared by RaycastScene — keeps the gameplay scene slimmer. */
 
 export const RAYCAST_PAUSE_MENU_LABELS = [
   'Reanudar',
   'Reiniciar nivel',
+  'Configuración de control',
   'Menú principal',
   'Subir volumen',
   'Bajar volumen',
@@ -13,6 +16,7 @@ export const RAYCAST_PAUSE_MENU_LABELS = [
 export type RaycastPauseMenuAction =
   | 'resume'
   | 'restart'
+  | 'controls'
   | 'menu'
   | 'vol_up'
   | 'vol_down'
@@ -22,6 +26,7 @@ export type RaycastPauseMenuAction =
 export const RAYCAST_PAUSE_MENU_ACTIONS: RaycastPauseMenuAction[] = [
   'resume',
   'restart',
+  'controls',
   'menu',
   'vol_up',
   'vol_down',
@@ -38,6 +43,7 @@ export function truncatePauseField(text: string, maxChars: number): string {
 }
 
 export interface RaycastPauseMenuMxModel {
+  activeInput: RaycastActiveInputKind;
   volumePct: number;
   selectionIndex: number;
   worldLine: string;
@@ -50,6 +56,26 @@ export interface RaycastPauseMenuMxModel {
   tokensLine: string;
   secretsLine: string;
   modifiersLine: string;
+}
+
+export const RAYCAST_CONTROL_PAUSE_ROWS = ['control', 'mouse', 'pad_sens', 'left_deadzone', 'right_deadzone', 'invert_y', 'vibration', 'screenshake', 'minimap', 'back'] as const;
+
+export type RaycastControlPauseRow = (typeof RAYCAST_CONTROL_PAUSE_ROWS)[number];
+
+export interface RaycastControlPauseModel {
+  activeInput: RaycastActiveInputKind;
+  controlStatus: string;
+  gamepadDebugLine?: string;
+  gamepadLiveLine?: string;
+  selectionIndex: number;
+  mouseSensitivity: string;
+  gamepadSensitivity: string;
+  leftDeadzone: string;
+  rightDeadzone: string;
+  invertY: string;
+  vibration: string;
+  screenshake: string;
+  minimap: string;
 }
 
 /**
@@ -96,12 +122,48 @@ export function formatRaycastPauseMenuMxBody(
     '',
     ...pairLines,
     '',
+    formatRaycastActiveInputLine(model.activeInput),
     'CONTROLES',
-    'WASD mover | Mouse mirar | 1/2/3 armas | R recargar | T reiniciar nivel | ESC pausa',
+    formatRaycastControlsHelpBlock(model.activeInput),
     '',
     '// MENÚ',
     ...menuLines,
     '',
     '↑ / ↓ elegir · ENTER aplicar · ESC cerrar'
+  ].join('\n');
+}
+
+export function formatRaycastControlPauseBody(model: RaycastControlPauseModel, opts?: { columnChars?: number }): string {
+  const w = opts?.columnChars ?? DEFAULT_COL_CHARS;
+  const L = (s: string) => truncatePauseField(s, w);
+  const rows: Array<[string, string]> = [
+    ['// CONTROL', `CONTROL · ${model.controlStatus}`],
+    ...(model.gamepadDebugLine ? [['', L(model.gamepadDebugLine)] as [string, string]] : []),
+    ...(model.gamepadLiveLine ? [['', L(model.gamepadLiveLine)] as [string, string]] : []),
+    ['// AJUSTES', L(`RATÓN · sensibilidad ${model.mouseSensitivity}`)],
+    ['', L(`MANDO · sensibilidad ${model.gamepadSensitivity}`)],
+    ['', L(`MANDO · deadzone izq ${model.leftDeadzone}`)],
+    ['', L(`MANDO · deadzone der ${model.rightDeadzone}`)],
+    ['', L(`MANDO · invertir eje Y ${model.invertY}`)],
+    ['', L(`MANDO · vibración ${model.vibration}`)],
+    ['', L(`PANTALLA · screenshake ${model.screenshake}`)],
+    ['', L(`MINIMAPA · visible ${model.minimap}`)],
+    ['', 'VOLVER AL MENÚ']
+  ];
+  const formatted = rows.map(([left, right], index) => {
+    const prefix = index === model.selectionIndex ? '>' : ' ';
+    if (left.startsWith('//')) return `${left}\n${prefix} ${right}`;
+    return `  ${left.padEnd(10)} ${prefix} ${right}`;
+  });
+  return [
+    'CONFIGURACIÓN DE CONTROL',
+    formatRaycastActiveInputLine(model.activeInput),
+    '',
+    'CONTROLES',
+    formatRaycastControlsHelpBlock(model.activeInput),
+    '',
+    ...formatted,
+    '',
+    '↑ / ↓ elegir · ← / → ajustar · A confirmar · B / ESC / START volver'
   ].join('\n');
 }

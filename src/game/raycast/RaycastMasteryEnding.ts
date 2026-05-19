@@ -1,3 +1,4 @@
+import { getGameSaveStorage } from '../save/SaveManager';
 import { RAYCAST_LEVEL_CATALOG, RAYCAST_WORLD_THREE_CATALOG, RAYCAST_WORLD_TWO_CATALOG } from './RaycastLevel';
 import type { RaycastRunRankParts } from './RaycastRunSummary';
 
@@ -50,7 +51,7 @@ export function evaluateRaycastMasteryEnding(input: RaycastMasteryEvaluationInpu
 }
 
 export function readRaycastMasteryUnlockState(
-  storage: Pick<Storage, 'getItem'> = typeof localStorage !== 'undefined' ? localStorage : { getItem: () => null }
+  storage: Pick<Storage, 'getItem'> = getGameSaveStorage()
 ): RaycastMasteryUnlockState {
   try {
     const raw = storage.getItem(RAYCAST_MASTERY_UNLOCK_STORAGE_KEY);
@@ -70,7 +71,7 @@ export function readRaycastMasteryUnlockState(
 
 export function writeRaycastMasteryUnlockState(
   state: RaycastMasteryUnlockState,
-  storage: Pick<Storage, 'setItem'> = typeof localStorage !== 'undefined' ? localStorage : { setItem: () => {} }
+  storage: Pick<Storage, 'setItem'> = getGameSaveStorage()
 ): void {
   try {
     storage.setItem(RAYCAST_MASTERY_UNLOCK_STORAGE_KEY, JSON.stringify(state));

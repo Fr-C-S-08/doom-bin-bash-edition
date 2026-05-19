@@ -143,14 +143,14 @@ export const RAYCAST_ENEMY_CONFIG = cloneEnemyConfigRecord({
   },
   BRUTE: {
     ...BASE_ENEMY_CONFIG.BRUTE,
-    color: 0xffa64d,
+    color: 0x5fd86a,
     speed: 78,
     attackCooldownMs: 1120,
     size: 40
   },
   STALKER: {
     ...BASE_ENEMY_CONFIG.STALKER,
-    color: 0x54e898,
+    color: 0x9f6aff,
     speed: 268,
     attackCooldownMs: 410,
     size: 26,
@@ -165,7 +165,7 @@ export const RAYCAST_ENEMY_CONFIG = cloneEnemyConfigRecord({
   },
   SCRAMBLER: {
     ...BASE_ENEMY_CONFIG.SCRAMBLER,
-    color: 0xff9058,
+    color: 0xffd84a,
     speed: 242,
     attackCooldownMs: 400,
     attackWindupMs: 82,
