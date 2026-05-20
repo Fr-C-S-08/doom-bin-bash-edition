@@ -240,19 +240,18 @@ export class RaycastRenderer {
       if (!didDrawWallTexture) {
         this.graphics.fillStyle(color, 1);
         this.graphics.fillRect(x, y, wallColumnWidth, wallHeight);
+        this.drawWallPattern(
+          hit.wallType,
+          column,
+          x,
+          y,
+          wallColumnWidth,
+          wallHeight,
+          shade,
+          atmosphere,
+          surface,
+        );
       }
-
-      this.drawWallPattern(
-        hit.wallType,
-        column,
-        x,
-        y,
-        wallColumnWidth,
-        wallHeight,
-        shade,
-        atmosphere,
-        surface,
-      );
 
       //this.drawWallColumnVolume(
         //hit,
