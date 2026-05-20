@@ -96,6 +96,35 @@ describe('gameMasterClient', () => {
     expect(result.message.length).toBeGreaterThan(5);
   });
 
+  it('requestNarration includes tts when voice is requested', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () =>
+        ({
+          message: 'Voz activa.',
+          source: 'fallback',
+        }) satisfies GameMasterResponse,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await requestNarration({
+      context: 'sector',
+      event: 'test',
+      tts: true,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      GAME_MASTER_NARRATE_URL,
+      expect.objectContaining({
+        body: JSON.stringify({
+          context: 'sector',
+          event: 'test',
+          tts: true,
+        }),
+      }),
+    );
+  });
+
   it('requestNarration aborts on timeout', async () => {
     vi.stubGlobal(
       'fetch',

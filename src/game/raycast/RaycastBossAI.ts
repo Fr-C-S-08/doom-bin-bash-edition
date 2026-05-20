@@ -5,6 +5,9 @@ import { isWallAt, type RaycastMap } from './RaycastMap';
 export const BOSS_DESPERATION_HP_RATIO = 0.15;
 export const BOSS_INTRO_DURATION_MS = 2800;
 export const BOSS_PHASE3_SPEED_MUL = 0.7;
+/** Third boss fight (`ash-judge-seal`) only — movement 35% slower; not damage/HP/spawn. */
+export const THIRD_BOSS_FIGHT_LEVEL_ID = 'ash-judge-seal';
+export const THIRD_BOSS_FIGHT_SPEED_MULTIPLIER = 0.65;
 export const BOSS_KITING_AWAY_DOT = -0.28;
 export const BOSS_CORNER_WALL_PROBE = 0.42;
 
@@ -138,12 +141,15 @@ export function getBossStrafeWeight(state: Pick<RaycastBossState, 'behavior' | '
 }
 
 export function resolveBossMoveSpeed(
-  state: Pick<RaycastBossState, 'behavior' | 'phase' | 'health' | 'maxHealth'>,
+  state: Pick<RaycastBossState, 'behavior' | 'phase' | 'health' | 'maxHealth' | 'arenaLevelId'>,
   telegraphSlow: number
 ): number {
   let speed = getBossBaseMoveSpeed(state);
   if (state.phase === 3) speed *= BOSS_PHASE3_SPEED_MUL;
   if (isBossDesperation(state)) speed *= 1.06;
+  if (state.arenaLevelId === THIRD_BOSS_FIGHT_LEVEL_ID) {
+    speed *= THIRD_BOSS_FIGHT_SPEED_MULTIPLIER;
+  }
   return speed * telegraphSlow;
 }
 

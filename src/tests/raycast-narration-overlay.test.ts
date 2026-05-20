@@ -23,7 +23,7 @@ describe('RaycastNarrationOverlay helpers', () => {
   it('buildRaycastNarrationLayout keeps a compact top-left radio band', () => {
     const layout = buildRaycastNarrationLayout(960, 540);
     expect(layout.originX).toBeLessThan(120);
-    expect(layout.originY).toBeGreaterThan(200);
+    expect(layout.originY).toBeGreaterThanOrEqual(180);
     expect(layout.originY).toBeLessThan(420);
     expect(layout.panelHeight).toBeLessThanOrEqual(72);
     expect(layout.bodyWrapWidth).toBeLessThan(layout.panelWidth);

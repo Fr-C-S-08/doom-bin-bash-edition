@@ -36,9 +36,10 @@ Runtime and delivery docs:
 
 ## API, backend, and OpenAPI
 
-- **No production HTTP API** — the shipped game is a **static browser client** (Vite build → `dist/`).
-- **OpenAPI does not apply** — there is no REST/GraphQL surface to document; persistence is **local** (`localStorage`).
-- **No Express/SQLite backend** in the current runtime (see [docs/infra.md](docs/infra.md)). Older MVP notes that mention optional stats servers are **historical** ([docs/adr/0001-stack-mvp.md](docs/adr/0001-stack-mvp.md)).
+- **Shipped game** — static **browser client** (Vite → `dist/`). Progression and settings use **`localStorage`** (`SaveManager`). **OpenAPI does not apply** to that client.
+- **Optional local LLM (demo / portfolio)** — separate **Express** process on **`http://localhost:3001`** talks to **Ollama** on **`http://localhost:11434`**. The raycast client sends gameplay events; Ollama returns one narration line; the game shows **`[GAME MASTER]`** subtitles. **No paid cloud API.** Gameplay stays async (no frame blocking); local fallback if Ollama is down.
+- **Full LLM guide (Spanish):** [docs/llm/ollama-game-master.md](docs/llm/ollama-game-master.md) — architecture, demo steps (`ollama serve` → `npm run server:dev` → `npm run dev` → **G** or boss/pickup), voice toggle, curl examples.
+- **Not** the score/progression backend — see [docs/infra.md](docs/infra.md). Historical MVP server notes: [docs/adr/0001-stack-mvp.md](docs/adr/0001-stack-mvp.md).
 
 ---
 
@@ -68,6 +69,7 @@ What you can actually play and show:
 | **HUD / minimap** | Compact terminal-style HUD, objective line, combat strip, **M** minimap (see in-game help). |
 | **World progression** | Episode 1 catalog → boss → optional **World 2** / **World 3** continuation when unlock flow allows (banners and atmosphere differ per arc). |
 | **Input / settings** | Keyboard/mouse, gamepad, touch (where supported), `SettingsScene` for session prefs. |
+| **Game Master (LLM)** | Optional **Ollama** narration on gameplay events; overlay subtitles; macOS `say` voice optional — see [docs/llm/ollama-game-master.md](docs/llm/ollama-game-master.md). |
 | **Quality gate** | `npm test`, `npm run lint`, `npm run build` expected green in CI and before releases. |
 
 **Legacy note:** `ArenaScene` source remains for unit/regression references but is **not registered** in `gameConfig.scene` — it is **not** reachable from the current menu. Do not demo it unless re-wired intentionally.

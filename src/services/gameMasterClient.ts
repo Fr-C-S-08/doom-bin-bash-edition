@@ -3,6 +3,8 @@ export type GameMasterSource = 'ollama' | 'fallback';
 export interface GameMasterRequest {
   context: string;
   event: string;
+  /** When true, server may speak via macOS `say` if `GAME_MASTER_TTS` is enabled. */
+  tts?: boolean;
 }
 
 export interface GameMasterResponse {
@@ -59,6 +61,7 @@ export async function requestNarration(
   const body: GameMasterRequest = {
     context: request.context.trim(),
     event: request.event.trim(),
+    ...(request.tts === true ? { tts: true } : {}),
   };
 
   const controller = new AbortController();

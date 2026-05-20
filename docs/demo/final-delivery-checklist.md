@@ -26,6 +26,7 @@ Use this list before the **~15 minute** presentation. Gameplay smoke details: [r
 ## Documentation
 
 - [ ] [architecture.md](../architecture.md) — current scenes and modules
+- [ ] [ollama-game-master.md](../llm/ollama-game-master.md) — **Ollama / Game Master** integration (for professor)
 - [ ] [adrs/README.md](../adrs/README.md) — portfolio ADR index (0002–0007)
 - [ ] [infra.md](../infra.md) — CI/CD, Docker, static deploy
 - [ ] [docker-validation.md](../runtime/docker-validation.md) — dated validation log
@@ -33,9 +34,20 @@ Use this list before the **~15 minute** presentation. Gameplay smoke details: [r
 
 ## OpenAPI / backend / infra (justify to professor)
 
-- [ ] **OpenAPI:** N/A — no HTTP API; static browser client. See note in [README](../../README.md) and [infra.md](../infra.md).
-- [ ] **Backend:** N/A for shipped slice — `localStorage` via `SaveManager`; no Express/SQLite in runtime.
+- [ ] **OpenAPI:** N/A for the static game client — persistence is `localStorage` via `SaveManager`.
+- [ ] **Gameplay backend:** N/A — no Express/SQLite for score/progression in the shipped slice ([infra.md](../infra.md)).
+- [ ] **LLM (optional demo):** local **Ollama** + **Express :3001** — documented in [ollama-game-master.md](../llm/ollama-game-master.md). Not required for CI; does not block combat if offline.
 - [ ] **Infra:** GitHub Actions + GitHub Pages + Docker dev — documented in `docs/runtime/`.
+
+## Demo Game Master / Ollama (optional, ~2 min)
+
+- [ ] `ollama serve` running; model `llama3.2:3b` pulled
+- [ ] `npm run server:dev` (optional: `GAME_MASTER_TTS=true` on macOS for voice)
+- [ ] `npm run dev` — enter raycast level
+- [ ] Pausa → **Configuración de control** → `GAME MASTER · narración SÍ`, voz según prefieras
+- [ ] Press **G** or trigger boss/pickup — see `[GAME MASTER]` subtitle
+- [ ] **F3** (or Tab) shows `GM idle|pending|off | voice on|off`
+- [ ] Stop Ollama once — game still runs; fallback line or discrete `fallback` source (perf HUD **P**)
 
 ## Demo readiness (gameplay)
 

@@ -15,6 +15,12 @@ Quick map for reviewers, demos, and handoff.
 | [runtime/cicd-validation.md](./runtime/cicd-validation.md) | Presentation-ready CI/CD validation checklist. |
 | [roadmap.md](./roadmap.md) | Historical academic roadmap + pointers to current state. |
 
+## LLM / Game Master (local Ollama)
+
+| Doc | Purpose |
+|-----|---------|
+| [llm/ollama-game-master.md](./llm/ollama-game-master.md) | **Integración LLM** — arquitectura, eventos, subtítulos, voz `say`, fallback, demo paso a paso, texto 30 s para presentación. |
+
 ## Demo & release
 
 | Doc | Purpose |

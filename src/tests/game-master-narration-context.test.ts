@@ -61,4 +61,34 @@ describe('gameMasterNarrationContext', () => {
     expect(context).toContain('neutralizada');
     expect(context).toContain('Doom/Halo/System Shock');
   });
+
+  it('buildGameMasterTelemetryBlock includes zone and objective when present', () => {
+    const block = buildGameMasterTelemetryBlock({
+      ...BASE_SNAPSHOT,
+      zoneId: 'relay-core',
+      objectiveLabel: 'ABRE LA SALIDA',
+    });
+    expect(block).toContain('relay-core');
+    expect(block).toContain('ABRE LA SALIDA');
+  });
+
+  it('buildGameMasterNarrationContext covers gameplay pickup and door events', () => {
+    const door = buildGameMasterNarrationContext('door_opened', {
+      ...BASE_SNAPSHOT,
+      pickupLabel: 'Pasaje norte',
+    });
+    expect(door).toContain('Pasaje norte');
+
+    const secret = buildGameMasterNarrationContext('secret_found', {
+      ...BASE_SNAPSHOT,
+      pickupLabel: 'Caché lateral',
+    });
+    expect(secret).toContain('Caché lateral');
+
+    const objective = buildGameMasterNarrationContext('objective_complete', {
+      ...BASE_SNAPSHOT,
+      objectiveLabel: 'EXTRACCIÓN',
+    });
+    expect(objective).toContain('EXTRACCIÓN');
+  });
 });

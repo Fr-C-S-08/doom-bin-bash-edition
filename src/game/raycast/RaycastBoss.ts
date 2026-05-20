@@ -86,6 +86,8 @@ export interface RaycastBossState {
   strafeFlipAt: number;
   cutAngleSign: number;
   desperationAnnounced: boolean;
+  /** Level id where this boss was spawned — used for fight-specific tuning (e.g. third boss speed). */
+  arenaLevelId?: string;
 }
 
 function telegraphMs(state: Pick<RaycastBossState, 'phase' | 'behavior'>): number {
@@ -137,7 +139,11 @@ export function getRaycastBossPhaseLabel(
   return 'FASE 3: TORMENTA DE ARCO // COLAPSO DE HALO';
 }
 
-export function createRaycastBossState(config: RaycastBossConfig, time: number): RaycastBossState {
+export function createRaycastBossState(
+  config: RaycastBossConfig,
+  time: number,
+  options?: { arenaLevelId?: string },
+): RaycastBossState {
   const scaledMaxHealth = Math.max(1, Math.round(config.maxHealth * BOSS_HEALTH_SCALE));
   return {
     id: config.id,
@@ -161,7 +167,8 @@ export function createRaycastBossState(config: RaycastBossConfig, time: number):
     strafeSign: config.id.charCodeAt(0) % 2 === 0 ? -1 : 1,
     strafeFlipAt: 0,
     cutAngleSign: config.id.charCodeAt(config.id.length - 1) % 2 === 0 ? -1 : 1,
-    desperationAnnounced: false
+    desperationAnnounced: false,
+    arenaLevelId: options?.arenaLevelId,
   };
 }
 

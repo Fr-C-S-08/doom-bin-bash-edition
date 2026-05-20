@@ -5,6 +5,8 @@ export const OLLAMA_TIMEOUT_MS = 15_000;
 export interface NarrateRequest {
   context?: string;
   event?: string;
+  /** Client requests spoken output when true; server still requires GAME_MASTER_TTS. */
+  tts?: boolean;
 }
 
 export interface NarrateResponse {

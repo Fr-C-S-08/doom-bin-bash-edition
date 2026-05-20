@@ -31,7 +31,10 @@ export interface RaycastGameMasterSnapshotInput {
   bossBehavior?: string;
   twinBossPresent?: boolean;
   pickupLabel?: string;
+  pickupKind?: string;
   rewardTier?: number;
+  zoneId?: string | null;
+  objectiveLabel?: string;
 }
 
 export function formatWeaponForGameMaster(kind: WeaponKind): string {
@@ -77,6 +80,9 @@ export function buildRaycastGameMasterSnapshot(
     bossBehavior: input.bossBehavior,
     twinBossPresent: input.twinBossPresent,
     pickupLabel: input.pickupLabel,
+    pickupKind: input.pickupKind,
     rewardTier: input.rewardTier,
+    zoneId: input.zoneId ?? null,
+    objectiveLabel: input.objectiveLabel,
   };
 }

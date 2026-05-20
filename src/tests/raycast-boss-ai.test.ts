@@ -8,6 +8,8 @@ import {
 import {
   BOSS_DESPERATION_HP_RATIO,
   BOSS_PHASE3_SPEED_MUL,
+  THIRD_BOSS_FIGHT_LEVEL_ID,
+  THIRD_BOSS_FIGHT_SPEED_MULTIPLIER,
   computeBossMovementIntent,
   getBossBaseMoveSpeed,
   getBossIntroCopy,
@@ -37,6 +39,23 @@ describe('raycast boss ai', () => {
     const resolved = resolveBossMoveSpeed(boss, 1);
     expect(resolved).toBeCloseTo(base * BOSS_PHASE3_SPEED_MUL, 3);
     expect(resolved).toBeLessThan(base * 0.75);
+  });
+
+  it('slows movement 35% on third boss fight only', () => {
+    const boss = createRaycastBossState(
+      { ...CONFIG, behavior: 'ash-judge' },
+      0,
+      { arenaLevelId: THIRD_BOSS_FIGHT_LEVEL_ID },
+    );
+    boss.phase = 2;
+    const without = resolveBossMoveSpeed(boss, 1);
+    const otherFight = createRaycastBossState({ ...CONFIG, behavior: 'ash-judge' }, 0, {
+      arenaLevelId: 'bloom-warden-grove',
+    });
+    otherFight.phase = 2;
+    const baseline = resolveBossMoveSpeed(otherFight, 1);
+    expect(without).toBeCloseTo(baseline * THIRD_BOSS_FIGHT_SPEED_MULTIPLIER, 4);
+    expect(THIRD_BOSS_FIGHT_SPEED_MULTIPLIER).toBe(0.65);
   });
 
   it('detects kiting when player moves away', () => {
