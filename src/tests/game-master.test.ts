@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildGameMasterPrompt,
   callOllama,
+  getOllamaGenerateUrl,
   narrate,
   pickFallbackMessage,
 } from '../../server/src/gameMaster';
@@ -35,6 +36,30 @@ describe('game master', () => {
   it('callOllama returns null when fetch fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
     await expect(callOllama('test')).resolves.toBeNull();
+  });
+
+  it('callOllama uses OLLAMA_BASE_URL for the generate endpoint', async () => {
+    const previous = process.env.OLLAMA_BASE_URL;
+    process.env.OLLAMA_BASE_URL = 'http://ollama:11434';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ response: 'ok' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await callOllama('probe');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://ollama:11434/api/generate',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    if (previous === undefined) delete process.env.OLLAMA_BASE_URL;
+    else process.env.OLLAMA_BASE_URL = previous;
+  });
+
+  it('getOllamaGenerateUrl defaults to localhost', () => {
+    const previous = process.env.OLLAMA_BASE_URL;
+    delete process.env.OLLAMA_BASE_URL;
+    expect(getOllamaGenerateUrl()).toBe('http://localhost:11434/api/generate');
+    if (previous !== undefined) process.env.OLLAMA_BASE_URL = previous;
   });
 
   it('callOllama returns trimmed response on success', async () => {

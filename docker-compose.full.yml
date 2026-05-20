@@ -1,0 +1,77 @@
+# Full local demo: Vite frontend + Game Master API + Ollama (no API keys).
+# Run: npm run dev:full
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: doom-ollama
+    ports:
+      - '11434:11434'
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ['CMD', 'ollama', 'list']
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 15s
+    restart: unless-stopped
+
+  ollama-bootstrap:
+    image: node:20-alpine
+    container_name: doom-ollama-bootstrap
+    working_dir: /app
+    volumes:
+      - ./scripts/ollama-bootstrap.mjs:/app/scripts/ollama-bootstrap.mjs:ro
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: llama3.2:3b
+    command: ['node', '/app/scripts/ollama-bootstrap.mjs']
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: 'no'
+
+  game-master:
+    build:
+      context: .
+      dockerfile: Dockerfile.game-master
+    container_name: doom-game-master
+    working_dir: /app
+    command: npx tsx server/src/index.ts
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      GAME_CLIENT_ORIGIN: http://localhost:5173
+    ports:
+      - '3001:3001'
+    volumes:
+      - ./server:/app/server:ro
+      - ./package.json:/app/package.json:ro
+      - ./package-lock.json:/app/package-lock.json:ro
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+
+  game:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: doom-game
+    working_dir: /app
+    command: npm run docker:dev
+    environment:
+      CHOKIDAR_USEPOLLING: 'true'
+      CHOKIDAR_INTERVAL: '100'
+    ports:
+      - '5173:5173'
+    volumes:
+      - ./:/app
+      - game_node_modules:/app/node_modules
+    depends_on:
+      - game-master
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
+  game_node_modules:

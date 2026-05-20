@@ -1,6 +1,22 @@
-export const OLLAMA_GENERATE_URL = 'http://localhost:11434/api/generate';
-export const OLLAMA_MODEL = 'llama3.2:3b';
 export const OLLAMA_TIMEOUT_MS = 15_000;
+
+const DEFAULT_OLLAMA_BASE_URL = 'http://localhost:11434';
+
+/** Base Ollama URL (no trailing slash). Override with OLLAMA_BASE_URL (Docker: http://ollama:11434). */
+export function getOllamaBaseUrl(): string {
+  const raw = process.env.OLLAMA_BASE_URL?.trim();
+  const base = raw && raw.length > 0 ? raw : DEFAULT_OLLAMA_BASE_URL;
+  return base.replace(/\/$/, '');
+}
+
+export function getOllamaGenerateUrl(): string {
+  return `${getOllamaBaseUrl()}/api/generate`;
+}
+
+/** @deprecated Use {@link getOllamaGenerateUrl} — kept for tests/docs references. */
+export const OLLAMA_GENERATE_URL = DEFAULT_OLLAMA_BASE_URL + '/api/generate';
+
+export const OLLAMA_MODEL = process.env.OLLAMA_MODEL?.trim() || 'llama3.2:3b';
 
 export interface NarrateRequest {
   context?: string;
@@ -51,7 +67,7 @@ export async function callOllama(prompt: string): Promise<string | null> {
   const timeout = setTimeout(() => controller.abort(), OLLAMA_TIMEOUT_MS);
 
   try {
-    const response = await fetch(OLLAMA_GENERATE_URL, {
+    const response = await fetch(getOllamaGenerateUrl(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

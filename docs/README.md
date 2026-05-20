@@ -19,7 +19,8 @@ Quick map for reviewers, demos, and handoff.
 
 | Doc | Purpose |
 |-----|---------|
-| [llm/ollama-game-master.md](./llm/ollama-game-master.md) | **Integración LLM** — arquitectura, eventos, subtítulos, voz `say`, fallback, demo paso a paso, texto 30 s para presentación. |
+| [llm/ollama-game-master.md](./llm/ollama-game-master.md) | **Integración LLM** — `npm run dev:full`, Ollama en Docker, eventos, fallback, demo manual. |
+| [runtime/docker-full.md](./runtime/docker-full.md) | Compose completo: Vite + Game Master + Ollama + bootstrap. |
 
 ## Demo & release
 

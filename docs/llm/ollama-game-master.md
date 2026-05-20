@@ -2,9 +2,38 @@
 
 Este documento explica **qué hace Ollama dentro del juego** y cómo demostrarlo en clase o portfolio.
 
+## Demo profesional (recomendado)
+
+**Un comando** — requiere **Docker Desktop**:
+
+```bash
+npm ci
+npm run dev:full
+```
+
+Abre [http://localhost:5173](http://localhost:5173).
+
+| Qué pasa | Detalle |
+|----------|---------|
+| **Primera vez** | Docker descarga imágenes; `ollama-bootstrap` puede tardar varios minutos bajando **`llama3.2:3b`**. |
+| **Después** | El modelo queda en el volumen `ollama_data`; no necesitas volver a descargarlo. |
+| **Sin Docker** | `npm run dev:full` muestra: *«Abre Docker Desktop y vuelve a ejecutar…»* |
+| **Ollama caído** | El backend responde `source: fallback`; el raycast **sigue** sin bloquear frames. |
+| **API keys** | **No** se usan OpenAI ni claves en el repo. |
+
+Comandos:
+
+```bash
+npm run dev:full:logs    # logs de todos los servicios
+npm run dev:full:smoke   # smoke: 5173, 3001/health, 11434/api/tags
+npm run dev:full:down    # bajar stack
+```
+
+Arquitectura Compose: [docs/runtime/docker-full.md](../runtime/docker-full.md).
+
 ## Resumen en una frase
 
-El juego **Phaser** detecta eventos de gameplay (jefe, llave, vida baja, muerte, etc.), envía contexto a un **microservicio Express local** (`localhost:3001`), ese servicio pide una línea corta a **Ollama en tu máquina** y el cliente muestra **subtítulos** `[GAME MASTER]`; opcionalmente el servidor lee la línea con la voz **`say`** de macOS. **No hay API de pago** y **el combate no se bloquea** si Ollama o el servidor fallan.
+El juego **Phaser** detecta eventos de gameplay (jefe, llave, vida baja, muerte, etc.), envía contexto a un **microservicio Express local** (`localhost:3001`), ese servicio pide una línea corta a **Ollama** (contenedor o host en `11434`) y el cliente muestra **subtítulos** `RADIO // GM`; opcionalmente el servidor lee la línea con **`say`** en macOS o voz del navegador en el cliente. **No hay API de pago** y **el combate no se bloquea** si Ollama o el servidor fallan.
 
 ## Qué hace Ollama (y qué no)
 
@@ -16,26 +45,24 @@ El juego **Phaser** detecta eventos de gameplay (jefe, llave, vida baja, muerte,
 
 Si Ollama no responde a tiempo, el backend y el cliente usan **mensajes fallback locales** (lista precargada). El jugador sigue jugando con normalidad.
 
-## Arquitectura (tres procesos locales)
+## Arquitectura (`npm run dev:full`)
 
 ```text
 ┌─────────────────┐     POST /api/game-master/narrate      ┌──────────────────────┐
-│  Juego (Vite)   │ ───────────────────────────────────► │  Express :3001       │
-│  localhost:5173 │ ◄──────── { message, source } ──────── │  server/src/         │
-│  RaycastScene   │         (respuesta inmediata)          │  gameMaster.ts       │
+│  game (Vite)    │ ───────────────────────────────────► │  game-master         │
+│  :5173          │ ◄──────── { message, source } ──────── │  Express :3001       │
 └─────────────────┘                                      └──────────┬───────────┘
-        │                                                             │
-        │ overlay [GAME MASTER]                                       │ POST /api/generate
-        │ (subtítulos, no bloquea frames)                             ▼
-        │                                                  ┌──────────────────────┐
-        │                                                  │  Ollama :11434       │
-        │                                                  │  modelo llama3.2:3b  │
-        │                                                  └──────────────────────┘
-        │
-        │  (opcional) servidor dispara `say` en macOS si TTS activo
-        ▼
-   Subtítulo en pantalla + voz local
+                                                                    │ OLLAMA_BASE_URL
+                                                                    ▼
+                                                         ┌──────────────────────┐
+                                                         │  ollama :11434       │
+                                                         │  llama3.2:3b         │
+                                                         └──────────────────────┘
+        ▲
+        │  ollama-bootstrap: pull si falta el modelo
 ```
+
+En Docker, el backend usa `OLLAMA_BASE_URL=http://ollama:11434`. En desarrollo manual sin Compose, el default es `http://localhost:11434`.
 
 **Flujo resumido:**
 
@@ -47,34 +74,40 @@ Si Ollama no responde a tiempo, el backend y el cliente usan **mensajes fallback
 
 ## Requisitos
 
+### Con Docker (`dev:full`)
+
+- Docker Desktop
+- Node.js 20+ para `npm ci` / scripts locales
+
+### Manual (sin Compose)
+
 - [Ollama](https://ollama.com/) instalado y en marcha
 - Modelo: `ollama pull llama3.2:3b`
-- Node.js 20+ (mismo repo)
-- **Opcional (voz):** macOS + variable `GAME_MASTER_TTS=true` al arrancar el servidor
+- Node.js 20+
+- **Opcional (voz servidor):** macOS + `GAME_MASTER_TTS=true` en `npm run server:dev`
 
-## Demo paso a paso (recomendado para el profesor)
+## Demo manual (tres terminales)
 
-Abre **tres terminales** (o dos si Ollama ya corre como servicio):
+Si no usas Docker:
 
 ```bash
-# 1) Motor LLM local (si no está ya activo)
+# 1) Motor LLM
 ollama serve
-# En otra terminal, una sola vez: ollama pull llama3.2:3b
+# otra terminal: ollama pull llama3.2:3b
 ```
 
 ```bash
-# 2) Backend narrador (desde la raíz del repo)
+# 2) Backend
 npm run server:dev
-# Con voz en macOS (opcional):
-# GAME_MASTER_TTS=true npm run server:dev
+# GAME_MASTER_TTS=true npm run server:dev   # voz macOS opcional
 ```
 
 ```bash
-# 3) Cliente del juego
+# 3) Cliente
 npm run dev
 ```
 
-4. En el navegador: **menú → prologue/nivel → entrar al raycast** (`http://localhost:5173`).
+4. Navegador: **menú → prólogo/nivel → raycast** en `http://localhost:5173`.
 
 5. Provocar narración:
    - **G** — prueba manual del Game Master (con narración activada en ajustes).
@@ -174,8 +207,10 @@ Se guardan en `localStorage` vía `SaveManager` (`gameMasterNarration`, `gameMas
 
 | Parámetro | Valor |
 |-----------|--------|
-| URL | `http://localhost:11434/api/generate` |
-| Modelo | `llama3.2:3b` |
+| Base URL | `OLLAMA_BASE_URL` (default `http://localhost:11434`; Docker: `http://ollama:11434`) |
+| Generate | `{OLLAMA_BASE_URL}/api/generate` |
+| Modelo | `OLLAMA_MODEL` o default `llama3.2:3b` |
+| Bootstrap | `scripts/ollama-bootstrap.mjs` en servicio Compose |
 | Streaming | `false` |
 | Timeout servidor | 15 s |
 | Timeout cliente | 8 s → fallback |
@@ -189,7 +224,7 @@ Se guardan en `localStorage` vía `SaveManager` (`gameMasterNarration`, `gameMas
 
 ## Sin API de pago
 
-Todo corre en **localhost**: Ollama + Express + Vite. No se envían datos a servicios cloud de LLM en el flujo documentado.
+Ollama + Express + Vite corren en tu máquina (host o contenedores). No se envían datos a servicios cloud de LLM en el flujo documentado. **No subas `.env` con secretos** — este proyecto no los necesita.
 
 ## Prueba rápida con curl
 
@@ -216,7 +251,10 @@ curl -s -X POST http://localhost:3001/api/game-master/narrate \
 | Ruta | Rol |
 |------|-----|
 | `server/src/index.ts` | Express, CORS `:5173`, ruta narrate |
-| `server/src/gameMaster.ts` | Prompt, llamada Ollama, fallback servidor |
+| `docker-compose.full.yml` | Stack `dev:full` |
+| `scripts/dev-full.mjs` | Wrapper `npm run dev:full` |
+| `scripts/ollama-bootstrap.mjs` | Pull automático del modelo |
+| `server/src/gameMaster.ts` | Prompt, `OLLAMA_BASE_URL`, fallback servidor |
 | `server/src/gameMasterTts.ts` | TTS opcional `say` |
 | `src/services/gameMasterClient.ts` | Cliente HTTP + fallback cliente |
 | `src/services/gameMasterNarrationBridge.ts` | Throttle, cola, async |

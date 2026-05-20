@@ -2,11 +2,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   chunkVoiceSpeakText,
   formatGameMasterVoiceHudLabel,
+  GM_VOICE_PITCH,
+  GM_VOICE_RATE,
   getGameMasterVoiceTestPhrase,
-  pickPreferredSpeechVoice,
+  pickPreferredMasculineSpeechVoice,
   resetGameMasterVoiceStateForTests,
   sanitizeVoiceSpeakText,
+  scoreMasculineSpeechVoice,
   speakGameMasterVoice,
+  stopGameMasterVoice,
   stripGameMasterVoicePrefixes,
 } from '../services/gameMasterVoice';
 
@@ -29,12 +33,14 @@ describe('game master voice', () => {
     expect(chunks.length).toBeGreaterThan(1);
   });
 
-  it('prefers es-MX voices when available', () => {
+  it('prefers masculine es-MX voice when available', () => {
     const voices = [
       { lang: 'en-US', name: 'Alex', default: false, voiceURI: 'en', localService: true } as SpeechSynthesisVoice,
-      { lang: 'es-MX', name: 'Paulina', default: false, voiceURI: 'mx', localService: true } as SpeechSynthesisVoice,
+      { lang: 'es-MX', name: 'Paulina', default: false, voiceURI: 'mx-f', localService: true } as SpeechSynthesisVoice,
+      { lang: 'es-MX', name: 'Jorge', default: false, voiceURI: 'mx-m', localService: true } as SpeechSynthesisVoice,
     ];
-    expect(pickPreferredSpeechVoice(voices)?.lang).toMatch(/es-MX/i);
+    expect(scoreMasculineSpeechVoice(voices[2], 'es-MX')).toBeGreaterThan(scoreMasculineSpeechVoice(voices[1], 'es-MX'));
+    expect(pickPreferredMasculineSpeechVoice(voices)?.name).toBe('Jorge');
   });
 
   it('reports unsupported when speechSynthesis is missing', () => {
@@ -44,20 +50,21 @@ describe('game master voice', () => {
     Object.defineProperty(globalThis, 'speechSynthesis', { value: original, configurable: true });
   });
 
-  it('applies voice cooldown unless urgent critical', () => {
+  it('uses human pacing rate and lower pitch', () => {
+    expect(GM_VOICE_RATE).toBeGreaterThanOrEqual(1.05);
+    expect(GM_VOICE_RATE).toBeLessThanOrEqual(1.12);
+    expect(GM_VOICE_PITCH).toBeGreaterThanOrEqual(0.65);
+    expect(GM_VOICE_PITCH).toBeLessThanOrEqual(0.78);
+  });
+
+  it('stopGameMasterVoice cancels speechSynthesis', () => {
+    const cancel = vi.fn();
     Object.defineProperty(globalThis, 'speechSynthesis', {
-      value: { speak: vi.fn(), cancel: vi.fn(), getVoices: () => [] } as unknown as SpeechSynthesis,
+      value: { speak: vi.fn(), cancel, getVoices: () => [] } as unknown as SpeechSynthesis,
       configurable: true,
     });
-    globalThis.SpeechSynthesisUtterance = class {
-      constructor(public text: string) {}
-    } as unknown as typeof SpeechSynthesisUtterance;
-
-    speakGameMasterVoice('Primera línea.', { tier: 'ambient' });
-    const second = speakGameMasterVoice('Segunda línea.', { tier: 'ambient' });
-    expect(second).toBe('speaking');
-    const third = speakGameMasterVoice('Tercera.', { tier: 'critical', urgent: true });
-    expect(third).toBe('speaking');
+    stopGameMasterVoice('player_death');
+    expect(cancel).toHaveBeenCalled();
   });
 
   it('uses Web Speech API when available', () => {
@@ -84,8 +91,8 @@ describe('game master voice', () => {
     expect(cancel).toHaveBeenCalled();
     expect(speak).toHaveBeenCalled();
     const utterance = speak.mock.calls[0][0] as InstanceType<typeof MockUtterance>;
-    expect(utterance.rate).toBe(0.86);
-    expect(utterance.pitch).toBe(0.82);
+    expect(utterance.rate).toBe(GM_VOICE_RATE);
+    expect(utterance.pitch).toBe(GM_VOICE_PITCH);
     expect(utterance.volume).toBe(1);
     expect(formatGameMasterVoiceHudLabel(true)).toContain('on');
   });

@@ -37,8 +37,8 @@ Runtime and delivery docs:
 ## API, backend, and OpenAPI
 
 - **Shipped game** — static **browser client** (Vite → `dist/`). Progression and settings use **`localStorage`** (`SaveManager`). **OpenAPI does not apply** to that client.
-- **Optional local LLM (demo / portfolio)** — separate **Express** process on **`http://localhost:3001`** talks to **Ollama** on **`http://localhost:11434`**. The raycast client sends gameplay events; Ollama returns one narration line; the game shows **`[GAME MASTER]`** subtitles. **No paid cloud API.** Gameplay stays async (no frame blocking); local fallback if Ollama is down.
-- **Full LLM guide (Spanish):** [docs/llm/ollama-game-master.md](docs/llm/ollama-game-master.md) — architecture, demo steps (`ollama serve` → `npm run server:dev` → `npm run dev` → **G** or boss/pickup), voice toggle, curl examples.
+- **Game Master + Ollama (demo principal)** — **un solo comando** con Docker: `npm run dev:full` levanta Vite (`5173`), Express (`3001`) y **Ollama** en contenedor (`11434`). Modelo **`llama3.2:3b`** se descarga la primera vez y queda en volumen Docker. **Sin API keys ni OpenAI.** Si Ollama o el modelo fallan, el backend responde con **`source: fallback`** y el juego no se rompe.
+- **Guía LLM (español):** [docs/llm/ollama-game-master.md](docs/llm/ollama-game-master.md) — arquitectura, `dev:full`, voz, curl, modo manual (3 terminales).
 - **Not** the score/progression backend — see [docs/infra.md](docs/infra.md). Historical MVP server notes: [docs/adr/0001-stack-mvp.md](docs/adr/0001-stack-mvp.md).
 
 ---
@@ -108,7 +108,39 @@ Current roulette options:
 7. `HUNTER MARK`
 8. `DARK ROUTE`
 
-## Docker Quick Start
+## Demo profesional (Game Master + Ollama)
+
+**Requisito:** [Docker Desktop](https://www.docker.com/products/docker-desktop/) en ejecución.
+
+```bash
+npm ci
+npm run dev:full
+```
+
+Abre [http://localhost:5173](http://localhost:5173). La primera vez, el servicio **ollama-bootstrap** puede tardar varios minutos descargando **`llama3.2:3b`**; después queda cacheado en el volumen `ollama_data`.
+
+| Servicio | URL |
+|----------|-----|
+| Juego (Vite) | http://localhost:5173 |
+| Game Master | http://localhost:3001/health |
+| Ollama | http://localhost:11434/api/tags |
+
+Comandos útiles:
+
+```bash
+npm run dev:full:logs    # seguir logs
+npm run dev:full:smoke   # comprobar 5173 / 3001 / 11434 (con stack arriba)
+npm run dev:full:down    # apagar contenedores
+```
+
+- **Ollama** corre en contenedor (`OLLAMA_BASE_URL=http://ollama:11434` en el backend).
+- **No** hay API keys ni secretos en el repo.
+- Tras descargar el modelo, **no** hace falta internet para narrar.
+- Si Ollama falla → `source: fallback` en la API; el FPS sigue.
+
+Modo manual (sin Compose): ver [docs/llm/ollama-game-master.md](docs/llm/ollama-game-master.md).
+
+## Docker Quick Start (solo frontend)
 
 Prerequisite: Docker Desktop running.
 
@@ -116,23 +148,6 @@ Prerequisite: Docker Desktop running.
 docker compose up --build
 ```
 
-Open:
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173). Stop: `docker compose down`.
 
-- [http://127.0.0.1:5173](http://127.0.0.1:5173)
-
-Validate:
-
-```bash
-curl -I http://127.0.0.1:5173
-```
-
-Stop:
-
-```bash
-docker compose down
-```
-
-More details:
-
-- [docs/runtime/docker.md](docs/runtime/docker.md)
-- [docs/runtime/docker-validation.md](docs/runtime/docker-validation.md)
+More details: [docs/runtime/docker.md](docs/runtime/docker.md), [docs/runtime/docker-validation.md](docs/runtime/docker-validation.md).

@@ -17,10 +17,59 @@ export interface SpeakGameMasterVoiceOptions {
 const TEST_PHRASE = 'Game Master en línea. Señal de voz activa.';
 const VOICE_COOLDOWN_MS = 2_200;
 const CHUNK_MAX_CHARS = 118;
-const VOICE_RATE = 0.86;
-const VOICE_PITCH = 0.82;
+/** Natural pacing — slightly faster than default, not rushed. */
+export const GM_VOICE_RATE = 1.08;
+export const GM_VOICE_PITCH = 0.72;
 
 const VOICE_LANG_PRIORITY = ['es-MX', 'es-ES', 'en-US'] as const;
+
+const FEMININE_VOICE_HINTS = [
+  'paulina',
+  'monica',
+  'marina',
+  'laura',
+  'samantha',
+  'victoria',
+  'female',
+  'mujer',
+  'helena',
+  'soledad',
+  'carmen',
+  'lucia',
+  'karen',
+  'moira',
+  'allison',
+  'susan',
+  'zira',
+] as const;
+
+const MASCULINE_VOICE_HINTS = [
+  'jorge',
+  'diego',
+  'carlos',
+  'juan',
+  'miguel',
+  'male',
+  'hombre',
+  'daniel',
+  'raul',
+  'enrique',
+  'pablo',
+  'alberto',
+  'fred',
+  'tom',
+  'rodrigo',
+  'antonio',
+  'jorge',
+  'deep',
+  'grave',
+  'bajo',
+  'low',
+  'bass',
+  'richard',
+  'aaron',
+  'james',
+] as const;
 
 let lastStatus: GameMasterVoiceStatus = 'idle';
 let lastDetail: string | null = null;
@@ -28,6 +77,7 @@ let lastSpokeAtMs = 0;
 let pendingTier: GameMasterNarrationTier | null = null;
 let selectedVoiceUri: string | null = null;
 let voicesPrimed = false;
+let pendingChunkCount = 0;
 
 export function getGameMasterVoiceState(): GameMasterVoiceState {
   return { status: lastStatus, detail: lastDetail };
@@ -91,34 +141,66 @@ export function chunkVoiceSpeakText(text: string, maxChars = CHUNK_MAX_CHARS): s
   return chunks.length > 0 ? chunks : [clean.slice(0, maxChars)];
 }
 
-function scoreSpeechVoice(voice: SpeechSynthesisVoice, lang: string): number {
+function baseLangScore(voice: SpeechSynthesisVoice, lang: string): number {
   let score = 0;
   if (voice.lang.toLowerCase().startsWith(lang.toLowerCase())) score += 10;
-  if (voice.default) score += 2;
+  if (voice.default) score += 1;
   const name = voice.name.toLowerCase();
-  if (name.includes('premium') || name.includes('enhanced') || name.includes('natural')) score += 4;
-  if (name.includes('google') || name.includes('samantha') || name.includes('paulina')) score += 2;
+  if (name.includes('premium') || name.includes('enhanced') || name.includes('natural')) score += 2;
   return score;
 }
 
-export function pickPreferredSpeechVoice(
+export function scoreMasculineSpeechVoice(voice: SpeechSynthesisVoice, lang: string): number {
+  let score = baseLangScore(voice, lang);
+  const name = voice.name.toLowerCase();
+  if (FEMININE_VOICE_HINTS.some((hint) => name.includes(hint))) score -= 24;
+  if (MASCULINE_VOICE_HINTS.some((hint) => name.includes(hint))) score += 10;
+  if (name.includes('deep') || name.includes('grave') || name.includes('bajo')) score += 6;
+  return score;
+}
+
+export function pickPreferredMasculineSpeechVoice(
   voices: SpeechSynthesisVoice[],
   priority = VOICE_LANG_PRIORITY,
 ): SpeechSynthesisVoice | null {
   if (voices.length === 0) return null;
-  let best: SpeechSynthesisVoice | null = null;
-  let bestScore = -1;
+
   for (const lang of priority) {
-    for (const voice of voices) {
-      const score = scoreSpeechVoice(voice, lang);
+    const langVoices = voices.filter((voice) => voice.lang.toLowerCase().startsWith(lang.toLowerCase()));
+    let best: SpeechSynthesisVoice | null = null;
+    let bestScore = -Infinity;
+    for (const voice of langVoices) {
+      const score = scoreMasculineSpeechVoice(voice, lang);
       if (score > bestScore) {
         bestScore = score;
         best = voice;
       }
     }
-    if (best && bestScore >= 10) return best;
+    if (best && bestScore >= 8) return best;
   }
-  return best ?? voices[0] ?? null;
+
+  let fallback: SpeechSynthesisVoice | null = null;
+  let fallbackScore = -Infinity;
+  for (const voice of voices) {
+    const score = Math.max(
+      scoreMasculineSpeechVoice(voice, 'es-MX'),
+      scoreMasculineSpeechVoice(voice, 'es-ES'),
+      scoreMasculineSpeechVoice(voice, 'en-US'),
+    );
+    if (score > fallbackScore) {
+      fallbackScore = score;
+      fallback = voice;
+    }
+  }
+  return fallback ?? voices[0] ?? null;
+}
+
+/** @deprecated Use {@link pickPreferredMasculineSpeechVoice} */
+export function pickPreferredSpeechVoice(
+  voices: SpeechSynthesisVoice[],
+  priority = VOICE_LANG_PRIORITY,
+): SpeechSynthesisVoice | null {
+  return pickPreferredMasculineSpeechVoice(voices, priority);
 }
 
 function resolveSpeechVoice(): SpeechSynthesisVoice | null {
@@ -130,8 +212,11 @@ function resolveSpeechVoice(): SpeechSynthesisVoice | null {
     const cached = voices.find((voice) => voice.voiceURI === selectedVoiceUri);
     if (cached) return cached;
   }
-  const picked = pickPreferredSpeechVoice(voices);
-  if (picked) selectedVoiceUri = picked.voiceURI;
+  const picked = pickPreferredMasculineSpeechVoice(voices);
+  if (picked) {
+    selectedVoiceUri = picked.voiceURI;
+    console.info('[GM voice] selected voice:', `${picked.name}/${picked.lang}`);
+  }
   return picked;
 }
 
@@ -167,15 +252,10 @@ function shouldPreemptVoice(incoming: GameMasterNarrationTier): boolean {
   return GAME_MASTER_TIER_RANK[incoming] >= GAME_MASTER_TIER_RANK[pendingTier];
 }
 
-function speakChunk(
-  chunk: string,
-  volume: number,
-  voice: SpeechSynthesisVoice | null,
-  isLast: boolean,
-): void {
+function speakChunk(chunk: string, volume: number, voice: SpeechSynthesisVoice | null): void {
   const utterance = new SpeechSynthesisUtterance(chunk);
-  utterance.rate = VOICE_RATE;
-  utterance.pitch = VOICE_PITCH;
+  utterance.rate = GM_VOICE_RATE;
+  utterance.pitch = GM_VOICE_PITCH;
   utterance.volume = volume;
   utterance.lang = voice?.lang ?? 'es-MX';
   if (voice) utterance.voice = voice;
@@ -185,13 +265,15 @@ function speakChunk(
     lastDetail = 'speaking';
   };
   utterance.onend = () => {
-    if (isLast) {
+    pendingChunkCount = Math.max(0, pendingChunkCount - 1);
+    if (pendingChunkCount <= 0) {
       lastStatus = 'idle';
       lastDetail = null;
       pendingTier = null;
     }
   };
   utterance.onerror = (event) => {
+    pendingChunkCount = 0;
     const mapped = mapSpeechError(event);
     lastStatus = mapped;
     lastDetail = mapped === 'blocked' ? 'blocked' : 'error';
@@ -199,6 +281,7 @@ function speakChunk(
     console.warn('[GM voice] synthesis error', event.error);
   };
 
+  pendingChunkCount += 1;
   globalThis.speechSynthesis.speak(utterance);
 }
 
@@ -221,6 +304,10 @@ export function speakGameMasterVoice(text: string, options: SpeakGameMasterVoice
     return 'unsupported';
   }
 
+  if (tier === 'critical' || urgent) {
+    stopGameMasterVoice('preempt_critical');
+  }
+
   if (shouldDropForCooldown(nowMs, urgent, tier)) {
     return lastStatus;
   }
@@ -231,12 +318,14 @@ export function speakGameMasterVoice(text: string, options: SpeakGameMasterVoice
 
   try {
     primeSpeechVoices();
-    globalThis.speechSynthesis.cancel();
+    if (tier !== 'critical' && !urgent) {
+      stopGameMasterVoice('preempt_new_line');
+    }
     const voice = resolveSpeechVoice();
     pendingTier = tier;
     lastSpokeAtMs = nowMs;
-    chunks.forEach((chunk, index) => {
-      speakChunk(chunk, volume, voice, index === chunks.length - 1);
+    chunks.forEach((chunk) => {
+      speakChunk(chunk, volume, voice);
     });
     lastStatus = 'speaking';
     lastDetail = 'speaking';
@@ -246,6 +335,7 @@ export function speakGameMasterVoice(text: string, options: SpeakGameMasterVoice
     lastStatus = 'error';
     lastDetail = 'error';
     pendingTier = null;
+    pendingChunkCount = 0;
     console.warn('[GM voice] speak failed', error);
     return 'error';
   }
@@ -255,18 +345,25 @@ export function speakGameMasterVoiceTest(volume = 1): GameMasterVoiceStatus {
   return speakGameMasterVoice(TEST_PHRASE, { urgent: true, volume, tier: 'important' });
 }
 
-export function cancelGameMasterVoice(): void {
+export function stopGameMasterVoice(reason: string): void {
   if (globalThis.speechSynthesis) {
     globalThis.speechSynthesis.cancel();
   }
+  pendingChunkCount = 0;
   lastStatus = 'idle';
   lastDetail = null;
   pendingTier = null;
+  console.info('[GM voice] cancelled:', reason);
+}
+
+/** @deprecated Use {@link stopGameMasterVoice} */
+export function cancelGameMasterVoice(): void {
+  stopGameMasterVoice('legacy_cancel');
 }
 
 /** @internal Tests only */
 export function resetGameMasterVoiceStateForTests(): void {
-  cancelGameMasterVoice();
+  stopGameMasterVoice('test_reset');
   lastStatus = 'idle';
   lastDetail = null;
   lastSpokeAtMs = 0;

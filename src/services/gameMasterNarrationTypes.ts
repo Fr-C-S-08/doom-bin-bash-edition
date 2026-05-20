@@ -103,6 +103,9 @@ export type GameMasterNarrationEventId = keyof typeof GAME_MASTER_NARRATION_EVEN
 
 export const GAME_MASTER_MIN_REQUEST_GAP_MS = 3_000;
 
+/** Local critical line on player death — spoken immediately after canceling prior GM audio. */
+export const PLAYER_DEATH_GM_MESSAGE = 'Tenemos una baja. Misión fallida.';
+
 export const GAME_MASTER_TIER_RANK: Record<GameMasterNarrationTier, number> = {
   critical: 3,
   important: 2,

@@ -248,11 +248,17 @@ import type {
   GameMasterNarrationEventId,
   GameMasterNarrationTier,
 } from '../../services/gameMasterNarrationTypes';
+import { PLAYER_DEATH_GM_MESSAGE } from '../../services/gameMasterNarrationTypes';
 import type { GameMasterSource } from '../../services/gameMasterClient';
+import {
+  buildGameMasterObjectiveReminderMessage,
+  GM_OBJECTIVE_REMINDER_COOLDOWN_MS,
+} from '../../services/gameMasterObjectiveReminder';
 import {
   formatGameMasterVoiceHudLabel,
   getGameMasterVoiceTestPhrase,
   speakGameMasterVoice,
+  stopGameMasterVoice,
 } from '../../services/gameMasterVoice';
 import {
   buildRaycastLowHealthWarningMessage,
@@ -444,6 +450,7 @@ export class RaycastScene extends Phaser.Scene {
   private lastGmTier: GameMasterNarrationTier | null = null;
   private adaptiveQuality = createRaycastAdaptiveQualityState();
   private narrationOverlayTick = 0;
+  private lastObjectiveReminderAtMs = 0;
   private minimapVisible = true;
   private helpOverlayVisible = false;
   private gamePaused = false;
@@ -555,6 +562,7 @@ export class RaycastScene extends Phaser.Scene {
   private readonly handleExitToMenu = (): void => {
     if (!this.isRaycastSceneActive()) return;
     this.gamePaused = false;
+    this.stopGameMasterPresentation('exit_menu');
     this.scene.start('MenuScene');
   };
 
@@ -576,6 +584,7 @@ export class RaycastScene extends Phaser.Scene {
   };
 
   private restartCurrentLevel(): void {
+    this.stopGameMasterPresentation('restart_level');
     this.scene.restart({
       levelId: this.currentLevel.id,
       difficultyId: this.difficultyId,
@@ -596,6 +605,7 @@ export class RaycastScene extends Phaser.Scene {
     const breachWorldThree =
       this.currentLevel.id === RAYCAST_WORLD_TWO_CATALOG[RAYCAST_WORLD_TWO_CATALOG.length - 1]?.id &&
       nextId === RAYCAST_WORLD_THREE_CATALOG[0]?.id;
+    this.stopGameMasterPresentation('level_transition');
     this.scene.restart({
       levelId: nextId,
       difficultyId: this.difficultyId,
@@ -613,6 +623,7 @@ export class RaycastScene extends Phaser.Scene {
     if (this.gamePaused) return;
     if (!this.levelComplete || !this.episodeComplete || !this.currentLevel.bossConfig) return;
     if (RAYCAST_WORLD_TWO_CATALOG.length > 0) return;
+    this.stopGameMasterPresentation('scene_change');
     this.scene.start('RaycastWorldLockedScene');
   };
 
@@ -646,6 +657,26 @@ export class RaycastScene extends Phaser.Scene {
     if (this.gamePaused) return;
     this.perfHudVisible = !this.perfHudVisible;
     this.perfText?.setVisible(this.perfHudVisible);
+  };
+
+  private readonly handleObjectiveReminderKey = (): void => {
+    if (!this.isRaycastSceneActive() || this.gamePaused || !this.playerAlive || this.levelComplete) {
+      return;
+    }
+    if (
+      !getGameMasterNarrationEnabled(this.registry) &&
+      !getGameMasterVoiceEnabled(this.registry)
+    ) {
+      return;
+    }
+    const now = this.time.now;
+    if (now - this.lastObjectiveReminderAtMs < GM_OBJECTIVE_REMINDER_COOLDOWN_MS) return;
+    this.lastObjectiveReminderAtMs = now;
+    const message = buildGameMasterObjectiveReminderMessage(
+      this.getObjectiveState(),
+      this.currentLevel.hudObjectiveLabels,
+    );
+    this.deliverGameMasterNarration(message, 'fallback', 'important');
   };
 
   private readonly handleGameMasterTestKey = (): void => {
@@ -1428,6 +1459,7 @@ export class RaycastScene extends Phaser.Scene {
       .setDepth(19)
       .setVisible(false);
 
+    stopGameMasterVoice('scene_start');
     const narrationHudLayout = buildRaycastHudLayout(GAME_WIDTH, GAME_HEIGHT);
     this.narrationOverlay = new RaycastNarrationOverlay(
       this,
@@ -1892,6 +1924,7 @@ export class RaycastScene extends Phaser.Scene {
     keyboard?.on('keydown-F3', this.handleToggleDebug);
     keyboard?.on('keydown-P', this.handleTogglePerfHud);
     keyboard?.on('keydown-G', this.handleGameMasterTestKey);
+    keyboard?.on('keydown-L', this.handleObjectiveReminderKey);
     keyboard?.on('keydown-UP', this.handlePauseMenuUp);
     keyboard?.on('keydown-DOWN', this.handlePauseMenuDown);
     keyboard?.on('keydown-LEFT', this.handlePauseMenuLeft);
@@ -1904,6 +1937,7 @@ export class RaycastScene extends Phaser.Scene {
   }
 
   private cleanupSceneLifecycle(): void {
+    this.stopGameMasterPresentation('scene_shutdown');
     if (!this.sceneReady && !this.inputListenersRegistered) return;
     this.sceneReady = false;
     this.gamepadInput?.destroy();
@@ -1941,6 +1975,7 @@ export class RaycastScene extends Phaser.Scene {
     keyboard?.off('keydown-F3', this.handleToggleDebug);
     keyboard?.off('keydown-P', this.handleTogglePerfHud);
     keyboard?.off('keydown-G', this.handleGameMasterTestKey);
+    keyboard?.off('keydown-L', this.handleObjectiveReminderKey);
     keyboard?.off('keydown-UP', this.handlePauseMenuUp);
     keyboard?.off('keydown-DOWN', this.handlePauseMenuDown);
     keyboard?.off('keydown-LEFT', this.handlePauseMenuLeft);
@@ -2442,6 +2477,17 @@ export class RaycastScene extends Phaser.Scene {
   private applyDebugHudToggle(): void {
     this.debugHudVisible = !this.debugHudVisible;
     this.debugText?.setVisible(this.debugHudVisible);
+  }
+
+  private stopGameMasterPresentation(reason: string): void {
+    stopGameMasterVoice(reason);
+    this.narrationOverlay?.clearTransmission();
+  }
+
+  /** Death uses a fixed critical line locally — no async narrate (avoids stale voice/text). */
+  private deliverPlayerDeathGameMaster(): void {
+    this.stopGameMasterPresentation('player_death');
+    this.deliverGameMasterNarration(PLAYER_DEATH_GM_MESSAGE, 'fallback', 'critical');
   }
 
   private deliverGameMasterNarration(
@@ -3081,12 +3127,12 @@ export class RaycastScene extends Phaser.Scene {
     this.setCombatMessage(`${getRaycastCombatMessageForSegment(this.getWorldSegment(), 'damage')} -${appliedDamage}`);
     if (this.playerHealth === 0) {
       this.playerAlive = false;
+      this.deliverPlayerDeathGameMaster();
       this.setCombatMessage('SEÑAL TERMINADA');
       this.cameras.main.shake(200, 0.0042);
       this.pulseFeedback(0xff1a3a, 0.14, 400);
       this.audioFeedback.play('death', 1, this.time.now);
       this.audioFeedback.play('uiDeny', 0.7, this.time.now + 85);
-      this.emitGameMasterNarration('player_death', {}, `run-${Math.floor(this.runStartedAt)}`);
       this.showRunCompleteOverlay('SEÑAL TERMINADA', this.hudCss.warningText, false, true);
       return;
     }
@@ -3251,6 +3297,7 @@ export class RaycastScene extends Phaser.Scene {
       if (this.isTerminalArcSector()) {
         this.runScore += Math.round(RAYCAST_FULL_ARC_CLEAR_BONUS * clearMul);
       }
+      this.stopGameMasterPresentation('level_complete');
       this.levelComplete = true;
       this.episodeComplete = this.nextLevelId === null;
       this.emitGameMasterNarration(

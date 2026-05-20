@@ -6,6 +6,7 @@ import {
   advanceNarrationQueue,
   computeNarrationOverlayAlpha,
   createRaycastNarrationQueueState,
+  type RaycastNarrationQueueState,
   enqueueNarrationMessage,
   RAYCAST_NARRATION_DEFAULT_DISPLAY_MS,
   RAYCAST_NARRATION_FADE_IN_MS,
@@ -14,7 +15,6 @@ import {
   tickNarrationPhase,
   type RaycastNarrationLayout,
   type RaycastNarrationOverlayConfig,
-  type RaycastNarrationQueueState,
 } from './RaycastNarration';
 import { computeNarrationFlickerMul } from './RaycastNarrationFx';
 import { RAYCAST_NARRATION_PALETTE } from './RaycastNarrationPalette';
@@ -176,6 +176,17 @@ export class RaycastNarrationOverlay {
     if (suppressed) {
       this.hideVisuals();
     }
+  }
+
+  clearTransmission(): void {
+    this.queue = createRaycastNarrationQueueState();
+    this.cachedBodyKey = '';
+    this.cachedBodyDisplay = '';
+    this.hideVisuals();
+  }
+
+  getQueueState(): RaycastNarrationQueueState {
+    return this.queue;
   }
 
   update(nowMs: number): void {

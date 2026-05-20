@@ -26,6 +26,7 @@ import { getRaycastBossLevelId, type RaycastBossShortcutSlot } from '../raycast/
 import { buildRaycastGamepadFooterLine } from '../raycast/RaycastInputHelp';
 import { RaycastGamepadInput } from '../systems/RaycastGamepadInput';
 import { RaycastTouchInput } from '../systems/RaycastTouchInput';
+import { stopGameMasterVoice } from '../../services/gameMasterVoice';
 
 const BG = RAYCAST_PALETTE.voidBlack;
 const BODY_COLOR = RAYCAST_CSS.bodyText;
@@ -48,11 +49,13 @@ export class PrologueScene extends Phaser.Scene {
   private inputListenersRegistered = false;
 
   private readonly handleContinueRaycast = (): void => {
+    stopGameMasterVoice('prologue_start_run');
     this.cleanupInputListeners();
     this.scene.start('RaycastScene', { difficultyId: this.difficultyId, runModifierId: this.runModifierId });
   };
 
   private readonly handleBackToMenu = (): void => {
+    stopGameMasterVoice('prologue_exit_menu');
     this.cleanupInputListeners();
     this.scene.start('MenuScene');
   };
@@ -103,6 +106,7 @@ export class PrologueScene extends Phaser.Scene {
   }
 
   create(): void {
+    stopGameMasterVoice('prologue_enter');
     prepareGameSession(this.registry);
     const width = this.scale.width;
     const height = this.scale.height;
@@ -173,7 +177,7 @@ export class PrologueScene extends Phaser.Scene {
         fontStyle: '700',
         color: ACCENT_COLOR,
         align: 'center',
-        lineSpacing: 7,
+        lineSpacing: 12,
         wordWrap: { width: layout.columnWidth }
       })
       .setOrigin(0.5, 0)
@@ -196,12 +200,12 @@ export class PrologueScene extends Phaser.Scene {
     this.modifierText = this.add
       .text(layout.centerX, layout.modifierY, this.buildModifierPrompt(), {
         fontFamily: 'monospace',
-        fontSize: layout.fontSmall,
+        fontSize: layout.fontBody,
         backgroundColor: '#05120ccc',
         color: ACCENT_COLOR,
         align: 'center',
-        lineSpacing: 5,
-        padding: { x: 14, y: 12 },
+        lineSpacing: 6,
+        padding: { x: 16, y: 14 },
         wordWrap: { width: Math.min(layout.contentWidth, 720), useAdvancedWrap: true }
       })
       .setOrigin(0.5, 0)
@@ -211,10 +215,11 @@ export class PrologueScene extends Phaser.Scene {
     this.promptText = this.add
       .text(layout.centerX, layout.promptY, `${copy.continueLine}\n${copy.backLine}`, {
         fontFamily: 'monospace',
-        fontSize: layout.fontSmall,
+        fontSize: layout.fontPrompt,
+        fontStyle: '700',
         color: ACCENT_COLOR,
         align: 'center',
-        lineSpacing: 4,
+        lineSpacing: 6,
         wordWrap: { width: layout.contentWidth }
       })
       .setOrigin(0.5, 1)
@@ -233,7 +238,7 @@ export class PrologueScene extends Phaser.Scene {
       .setDepth(5);
 
     this.add
-      .text(width * 0.5, height - 14, '// FRAGMENTO DE SEÑAL  ·  A Doom Bin Bash Project', {
+      .text(layout.centerX, layout.footerY, '// FRAGMENTO DE SEÑAL  ·  A Doom Bin Bash Project', {
         fontFamily: 'monospace',
         fontSize: '10px',
         color: ACCENT_COLOR,
