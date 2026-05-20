@@ -58,7 +58,21 @@ export interface RaycastPauseMenuMxModel {
   modifiersLine: string;
 }
 
-export const RAYCAST_CONTROL_PAUSE_ROWS = ['control', 'mouse', 'pad_sens', 'left_deadzone', 'right_deadzone', 'invert_y', 'vibration', 'screenshake', 'minimap', 'back'] as const;
+export const RAYCAST_CONTROL_PAUSE_ROWS = [
+  'control',
+  'mouse',
+  'pad_sens',
+  'left_deadzone',
+  'right_deadzone',
+  'invert_y',
+  'vibration',
+  'screenshake',
+  'minimap',
+  'gm_narration',
+  'gm_duration',
+  'gm_debug',
+  'back',
+] as const;
 
 export type RaycastControlPauseRow = (typeof RAYCAST_CONTROL_PAUSE_ROWS)[number];
 
@@ -76,6 +90,9 @@ export interface RaycastControlPauseModel {
   vibration: string;
   screenshake: string;
   minimap: string;
+  gmNarration: string;
+  gmDuration: string;
+  gmDebug: string;
 }
 
 /**
@@ -148,6 +165,9 @@ export function formatRaycastControlPauseBody(model: RaycastControlPauseModel, o
     ['', L(`MANDO · vibración ${model.vibration}`)],
     ['', L(`PANTALLA · screenshake ${model.screenshake}`)],
     ['', L(`MINIMAPA · visible ${model.minimap}`)],
+    ['// GAME MASTER', L(`NARRACIÓN IA · ${model.gmNarration}`)],
+    ['', L(`NARRACIÓN · duración ${model.gmDuration}`)],
+    ['', L(`NARRACIÓN · debug ${model.gmDebug}`)],
     ['', 'VOLVER AL MENÚ']
   ];
   const formatted = rows.map(([left, right], index) => {

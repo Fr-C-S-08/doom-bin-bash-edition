@@ -31,12 +31,13 @@ export function buildGameMasterPrompt(body: NarrateRequest): string {
   const event = body.event?.trim() || 'el jugador avanza con cautela';
 
   return [
-    'Eres el Game Master de un FPS retro raycast en español (México).',
-    'Responde en UNA sola línea (máx. 22 palabras), tono tensión arcade/horror.',
-    'Sin listas, sin emojis, sin romper la cuarta pared.',
-    `Contexto: ${context}.`,
-    `Evento: ${event}.`,
-    'Narración:',
+    'Eres la voz de radio del Game Master en un FPS retro raycast (Doom/Halo/System Shock).',
+    'Español México. UNA línea, máximo 18 palabras.',
+    'Tono: búnker sci-fi, tensión militar, atmósfera opresiva; sin humor ni cuarta pared.',
+    'Sin listas ni emojis. Frases cortas, narración diegética por radio.',
+    `Telemetría: ${context}.`,
+    `Momento: ${event}.`,
+    'Transmisión:',
   ].join(' ');
 }
 

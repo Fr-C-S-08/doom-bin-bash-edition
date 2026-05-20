@@ -57,7 +57,10 @@ describe('raycast pause menu formatting', () => {
       invertY: 'NO',
       vibration: 'SÍ',
       screenshake: 'SÍ',
-      minimap: 'SÍ'
+      minimap: 'SÍ',
+      gmNarration: 'SÍ',
+      gmDuration: '5.2s',
+      gmDebug: 'NO'
     });
 
     expect(body).toContain('CONFIGURACIÓN DE CONTROL');

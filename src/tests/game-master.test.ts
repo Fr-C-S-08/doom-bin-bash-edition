@@ -13,7 +13,8 @@ describe('game master', () => {
 
   it('buildGameMasterPrompt uses defaults when fields are empty', () => {
     const prompt = buildGameMasterPrompt({});
-    expect(prompt).toContain('español (México)');
+    expect(prompt).toContain('Español México');
+    expect(prompt).toContain('Doom/Halo/System Shock');
     expect(prompt).toContain('sector hostil');
     expect(prompt).toContain('el jugador avanza');
   });
@@ -21,10 +22,11 @@ describe('game master', () => {
   it('buildGameMasterPrompt embeds context and event', () => {
     const prompt = buildGameMasterPrompt({
       context: 'pozo volt',
-      event: 'boss al 30%',
+      event: 'boss_spawn',
     });
-    expect(prompt).toContain('pozo volt');
-    expect(prompt).toContain('boss al 30%');
+    expect(prompt).toContain('Telemetría: pozo volt');
+    expect(prompt).toContain('Momento: boss_spawn');
+    expect(prompt).toContain('Transmisión:');
   });
 
   it('pickFallbackMessage returns a non-empty string', () => {
