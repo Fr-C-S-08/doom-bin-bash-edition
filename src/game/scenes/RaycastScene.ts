@@ -235,11 +235,25 @@ import {
   type RaycastFrameStatsState
 } from '../raycast/RaycastFrameStats';
 import { buildRaycastGameMasterSnapshot } from '../raycast/RaycastGameMasterSnapshot';
+import { buildRaycastNarrationLayoutFromHud } from '../raycast/RaycastNarration';
 import { RaycastNarrationOverlay } from '../raycast/RaycastNarrationOverlay';
+import {
+  createRaycastAdaptiveQualityState,
+  getEffectiveMinimapStride,
+  updateAdaptiveMinimapStrideBoost,
+} from '../raycast/RaycastAdaptiveQuality';
 import { appendRaycastPlaytestTelemetry } from '../raycast/RaycastTelemetry';
 import { GameMasterNarrationBridge } from '../../services/gameMasterNarrationBridge';
-import type { GameMasterNarrationEventId } from '../../services/gameMasterNarrationTypes';
+import type {
+  GameMasterNarrationEventId,
+  GameMasterNarrationTier,
+} from '../../services/gameMasterNarrationTypes';
 import type { GameMasterSource } from '../../services/gameMasterClient';
+import {
+  formatGameMasterVoiceHudLabel,
+  getGameMasterVoiceTestPhrase,
+  speakGameMasterVoice,
+} from '../../services/gameMasterVoice';
 import {
   buildRaycastLowHealthWarningMessage,
   getRaycastFeedbackActions,
@@ -271,10 +285,12 @@ import { computeRaycastPausePanelLayout } from '../raycast/RaycastPausePanelLayo
 import {
   applyFpsTargetToGame,
   cycleFpsTarget,
+  cycleMinimapQuality,
   cycleRenderQuality,
   formatFpsTargetLabel,
+  formatMinimapQualityLabel,
   formatRenderQualityLabel,
-  getMinimapStrideForRenderQuality
+  getMinimapStrideForMinimapQuality,
 } from '../raycast/RaycastPerformanceSettings';
 import {
   formatRaycastGamepadDebugLine,
@@ -298,8 +314,13 @@ import {
   getGameMasterNarrationDurationMs,
   getGameMasterNarrationEnabled,
   getGameMasterVoiceEnabled,
+  getGameMasterVoiceVolume,
+  adjustGameMasterVoiceVolume,
+  getMinimapQuality,
   getFpsTarget,
   getRenderQuality,
+  setGameMasterNarrationDebug,
+  setMinimapQuality,
   getGamepadInvertY,
   getGamepadLeftDeadzone,
   getGamepadRightDeadzone,
@@ -420,6 +441,9 @@ export class RaycastScene extends Phaser.Scene {
   private narrationOverlay!: RaycastNarrationOverlay;
   private gameMasterNarration!: GameMasterNarrationBridge;
   private lastGmSource: GameMasterSource | null = null;
+  private lastGmTier: GameMasterNarrationTier | null = null;
+  private adaptiveQuality = createRaycastAdaptiveQualityState();
+  private narrationOverlayTick = 0;
   private minimapVisible = true;
   private helpOverlayVisible = false;
   private gamePaused = false;
@@ -626,6 +650,19 @@ export class RaycastScene extends Phaser.Scene {
 
   private readonly handleGameMasterTestKey = (): void => {
     if (!this.isRaycastSceneActive() || this.gamePaused) return;
+    if (getGameMasterVoiceEnabled(this.registry)) {
+      const phrase = getGameMasterVoiceTestPhrase();
+      if (getGameMasterNarrationEnabled(this.registry)) {
+        this.deliverGameMasterNarration(phrase, 'fallback', 'important');
+      } else {
+        speakGameMasterVoice(phrase, {
+          urgent: true,
+          volume: getGameMasterVoiceVolume(this.registry),
+          tier: 'important',
+        });
+      }
+      return;
+    }
     this.emitGameMasterNarration('manual_debug', {}, `g-${Math.floor(this.time.now)}`);
   };
 
@@ -1391,20 +1428,17 @@ export class RaycastScene extends Phaser.Scene {
       .setDepth(19)
       .setVisible(false);
 
+    const narrationHudLayout = buildRaycastHudLayout(GAME_WIDTH, GAME_HEIGHT);
     this.narrationOverlay = new RaycastNarrationOverlay(
       this,
-      GAME_WIDTH,
-      GAME_HEIGHT,
+      buildRaycastNarrationLayoutFromHud(narrationHudLayout),
       this.hudCss,
       { displayMs: getGameMasterNarrationDurationMs(this.registry) },
       { debug: getGameMasterNarrationDebug(this.registry) },
     );
     this.gameMasterNarration = new GameMasterNarrationBridge(
-      (message, source) => this.deliverGameMasterNarration(message, source),
-      {
-        debug: getGameMasterNarrationDebug(this.registry),
-        getVoiceEnabled: () => getGameMasterVoiceEnabled(this.registry),
-      },
+      (message, source, tier) => this.deliverGameMasterNarration(message, source, tier),
+      { debug: getGameMasterNarrationDebug(this.registry) },
     );
     if (this.currentLevel.bossConfig) {
       this.requestBossSpawnGameMasterNarration();
@@ -1522,6 +1556,14 @@ export class RaycastScene extends Phaser.Scene {
     this.targetBarTrack.setVisible(false);
     this.targetBarFill.setVisible(false);
     this.updatePriorityMessage(objective, hint, objectiveState.recentBlockedReason !== undefined && objectiveState.recentBlockedReason !== null);
+    const frameMsNow = performance.now() - frameStartMs;
+    const fpsNow = frameMsNow > 0 ? 1000 / frameMsNow : this.frameStats.fps;
+    const fpsTarget = getFpsTarget(this.registry);
+    this.adaptiveQuality = updateAdaptiveMinimapStrideBoost(
+      this.adaptiveQuality,
+      fpsNow,
+      fpsTarget === 0 ? 120 : fpsTarget,
+    );
     this.renderMinimapThrottled();
     if (this.debugHudVisible) {
       this.debugText.setText(
@@ -1791,8 +1833,9 @@ export class RaycastScene extends Phaser.Scene {
     this.bossTelegraphById.clear();
     this.lastBossPhaseById.clear();
     this.bossStates = [];
+    const arenaOpts = { arenaLevelId: this.currentLevel.id };
     if (this.currentLevel.bossConfig) {
-      const primary = createRaycastBossState(this.currentLevel.bossConfig, this.time.now);
+      const primary = createRaycastBossState(this.currentLevel.bossConfig, this.time.now, arenaOpts);
       this.bossStates.push(primary);
       this.lastBossPhaseById.set(primary.id, primary.phase);
       const behavior = this.currentLevel.bossConfig.behavior ?? 'volt-archon';
@@ -1813,7 +1856,8 @@ export class RaycastScene extends Phaser.Scene {
     if (this.currentLevel.id === 'ash-judge-seal') {
       const twin = createRaycastBossState(
         { id: 'ash-judge-twin', displayName: 'Ash Judge Prime', x: 9.8, y: 7.1, maxHealth: 920, hitRadius: 0.75, behavior: 'ash-judge' },
-        this.time.now
+        this.time.now,
+        arenaOpts,
       );
       this.bossStates.push(twin);
       this.lastBossPhaseById.set(twin.id, twin.phase);
@@ -2400,12 +2444,25 @@ export class RaycastScene extends Phaser.Scene {
     this.debugText?.setVisible(this.debugHudVisible);
   }
 
-  private deliverGameMasterNarration(message: string, source: GameMasterSource): void {
-    if (!getGameMasterNarrationEnabled(this.registry)) return;
+  private deliverGameMasterNarration(
+    message: string,
+    source: GameMasterSource,
+    tier: GameMasterNarrationTier = 'ambient',
+  ): void {
     this.lastGmSource = source;
+    this.lastGmTier = tier;
     const line = this.formatGameMasterOverlayMessage(message);
     if (!line) return;
-    this.narrationOverlay?.showNarration(`[GAME MASTER] ${line}`);
+    if (getGameMasterNarrationEnabled(this.registry)) {
+      this.narrationOverlay?.showNarration(line, tier);
+    }
+    if (getGameMasterVoiceEnabled(this.registry)) {
+      speakGameMasterVoice(line, {
+        volume: getGameMasterVoiceVolume(this.registry),
+        tier,
+        urgent: tier === 'critical',
+      });
+    }
   }
 
   private formatGameMasterOverlayMessage(message: string): string {
@@ -2419,9 +2476,10 @@ export class RaycastScene extends Phaser.Scene {
   private updateNarrationOverlay(): void {
     const suppressed = this.gamePaused || this.finalOverlay.visible;
     this.narrationOverlay.setSuppressed(suppressed);
-    if (!suppressed) {
-      this.narrationOverlay.update(this.time.now);
-    }
+    if (suppressed) return;
+    this.narrationOverlayTick += 1;
+    if (this.narrationOverlayTick % 2 !== 0) return;
+    this.narrationOverlay.update(this.time.now);
   }
 
   private buildGameMasterHudStatusLine(): string {
@@ -2429,15 +2487,22 @@ export class RaycastScene extends Phaser.Scene {
       narrationEnabled: getGameMasterNarrationEnabled(this.registry),
       inFlight: this.gameMasterNarration?.isNarrationInFlight() ?? false,
       voiceEnabled: getGameMasterVoiceEnabled(this.registry),
+      lastTier: this.gameMasterNarration?.getLastHudTier() ?? this.lastGmTier,
       lastSource: this.lastGmSource,
     });
   }
 
   private buildGameMasterStatusForSettings(): string {
-    if (!getGameMasterNarrationEnabled(this.registry)) return 'off';
-    if (this.gameMasterNarration?.isNarrationInFlight()) return 'pending';
-    if (this.lastGmSource === 'ollama' || this.lastGmSource === 'fallback') return this.lastGmSource;
-    return 'idle';
+    const voice = formatGameMasterVoiceHudLabel(getGameMasterVoiceEnabled(this.registry));
+    if (!getGameMasterNarrationEnabled(this.registry)) {
+      return getGameMasterVoiceEnabled(this.registry) ? `narr off · voice ${voice}` : 'off';
+    }
+    if (this.gameMasterNarration?.isNarrationInFlight()) return `pending · voice ${voice}`;
+    const narr =
+      this.lastGmSource === 'ollama' || this.lastGmSource === 'fallback'
+        ? this.lastGmSource
+        : 'idle';
+    return `${narr} · voice ${voice}`;
   }
 
   private buildDebugHudExtrasLine(): string {
@@ -2594,12 +2659,28 @@ export class RaycastScene extends Phaser.Scene {
   }
 
   private triggerGameMasterTestFromPause(): void {
-    if (!getGameMasterNarrationEnabled(this.registry)) {
+    const voiceOn = getGameMasterVoiceEnabled(this.registry);
+    const narrOn = getGameMasterNarrationEnabled(this.registry);
+    if (!voiceOn && !narrOn) {
       this.setCombatMessage('GAME MASTER APAGADO', 1800);
       this.refreshPauseMenuBody();
       return;
     }
-    this.emitGameMasterNarration('manual_debug', {}, `pause-g-${Math.floor(this.time.now)}`);
+    if (voiceOn) {
+      const phrase = getGameMasterVoiceTestPhrase();
+      if (narrOn) {
+        this.deliverGameMasterNarration(phrase, 'fallback', 'important');
+      } else {
+        speakGameMasterVoice(phrase, {
+          urgent: true,
+          volume: getGameMasterVoiceVolume(this.registry),
+          tier: 'important',
+        });
+        this.setCombatMessage('PRUEBA DE VOZ GM', 1600);
+      }
+    } else {
+      this.emitGameMasterNarration('manual_debug', {}, `pause-g-${Math.floor(this.time.now)}`);
+    }
     this.refreshPauseMenuBody();
     this.audioFeedback.play('uiConfirm', 0.68, this.time.now);
   }
@@ -2614,10 +2695,14 @@ export class RaycastScene extends Phaser.Scene {
           selectionIndex: this.pauseSettingsSelectionIndex,
           gmNarration: getGameMasterNarrationEnabled(this.registry) ? 'SÍ' : 'NO',
           gmVoice: getGameMasterVoiceEnabled(this.registry) ? 'SÍ' : 'NO',
+          gmVoiceVolume: `${Math.round(getGameMasterVoiceVolume(this.registry) * 100)}%`,
           gmStatus: this.buildGameMasterStatusForSettings(),
-          gmTestHint: 'ENTER prueba · G en juego',
+          gmTestHint: 'ENTER voz · G en juego',
           fpsTarget: formatFpsTargetLabel(getFpsTarget(this.registry)),
           renderQuality: formatRenderQualityLabel(getRenderQuality(this.registry)),
+          minimapQuality: formatMinimapQualityLabel(getMinimapQuality(this.registry)),
+          debugPerfHud: this.perfHudVisible ? 'SÍ' : 'NO',
+          debugGmLogs: getGameMasterNarrationDebug(this.registry) ? 'SÍ' : 'NO',
         }),
       );
       return;
@@ -2719,12 +2804,29 @@ export class RaycastScene extends Phaser.Scene {
       case 'gm_voice':
         setGameMasterVoiceEnabled(this.registry, flip(getGameMasterVoiceEnabled(this.registry)));
         break;
+      case 'gm_voice_volume':
+        adjustGameMasterVoiceVolume(this.registry, direction * 0.1);
+        break;
       case 'fps_target':
         setFpsTarget(this.registry, cycleFpsTarget(getFpsTarget(this.registry), direction));
         this.applyPerformanceSettings();
         break;
       case 'render_quality':
         setRenderQuality(this.registry, cycleRenderQuality(getRenderQuality(this.registry), direction));
+        break;
+      case 'minimap_quality':
+        setMinimapQuality(this.registry, cycleMinimapQuality(getMinimapQuality(this.registry), direction));
+        break;
+      case 'debug_perf_hud':
+        this.perfHudVisible = flip(this.perfHudVisible);
+        this.perfText?.setVisible(this.perfHudVisible);
+        break;
+      case 'debug_gm_logs':
+        setGameMasterNarrationDebug(this.registry, flip(getGameMasterNarrationDebug(this.registry)));
+        this.narrationOverlay?.applyConfig(
+          { displayMs: getGameMasterNarrationDurationMs(this.registry) },
+          { debug: getGameMasterNarrationDebug(this.registry) },
+        );
         break;
       case 'gm_test':
       case 'back':
@@ -3494,8 +3596,11 @@ export class RaycastScene extends Phaser.Scene {
     if (!this.gamePaused) {
       this.minimapFrameCounter += 1;
       const pixelation = this.activeLevelEvent.effects.minimapPixelation ?? 0;
-      const qualityStride = getMinimapStrideForRenderQuality(getRenderQuality(this.registry));
-      const stride = Math.max(qualityStride, pixelation >= 0.5 ? 4 : pixelation > 0 ? 3 : 2);
+      const qualityStride = getMinimapStrideForMinimapQuality(getMinimapQuality(this.registry));
+      const stride = getEffectiveMinimapStride(
+        Math.max(qualityStride, pixelation >= 0.5 ? 4 : pixelation > 0 ? 3 : 2),
+        this.adaptiveQuality.minimapStrideBoost,
+      );
       if (this.minimapFrameCounter % stride !== 0) {
         return;
       }

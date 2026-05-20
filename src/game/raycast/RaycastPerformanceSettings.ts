@@ -45,11 +45,31 @@ export function cycleRenderQuality(current: RenderQualityId, direction: number):
   return RENDER_QUALITY_OPTIONS[next] ?? DEFAULT_RENDER_QUALITY;
 }
 
+export type MinimapQualityId = RenderQualityId;
+
+export function normalizeMinimapQuality(value: unknown): MinimapQualityId {
+  return normalizeRenderQuality(value);
+}
+
+export function formatMinimapQualityLabel(quality: MinimapQualityId): string {
+  if (quality === 'performance') return 'Baja (FPS+)';
+  if (quality === 'quality') return 'Alta';
+  return 'Media';
+}
+
+export function cycleMinimapQuality(current: MinimapQualityId, direction: number): MinimapQualityId {
+  return cycleRenderQuality(current, direction);
+}
+
 /** Minimap refresh stride while playing (higher = less often). */
 export function getMinimapStrideForRenderQuality(quality: RenderQualityId): number {
   if (quality === 'performance') return 5;
   if (quality === 'quality') return 2;
   return 3;
+}
+
+export function getMinimapStrideForMinimapQuality(quality: MinimapQualityId): number {
+  return getMinimapStrideForRenderQuality(quality);
 }
 
 export function applyFpsTargetToGame(game: Phaser.Game, target: FpsTarget): void {

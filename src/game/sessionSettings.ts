@@ -4,8 +4,10 @@ import {
   DEFAULT_FPS_TARGET,
   DEFAULT_RENDER_QUALITY,
   normalizeFpsTarget,
+  normalizeMinimapQuality,
   normalizeRenderQuality,
   type FpsTarget,
+  type MinimapQualityId,
   type RenderQualityId,
 } from './raycast/RaycastPerformanceSettings';
 
@@ -31,6 +33,8 @@ export const SESSION_GM_NARRATION_ENABLED_KEY = 'session_gm_narration_enabled';
 export const SESSION_GM_VOICE_ENABLED_KEY = 'session_gm_voice_enabled';
 export const SESSION_GM_NARRATION_DURATION_KEY = 'session_gm_narration_duration_ms';
 export const SESSION_GM_NARRATION_DEBUG_KEY = 'session_gm_narration_debug';
+export const SESSION_GM_VOICE_VOLUME_KEY = 'session_gm_voice_volume';
+export const SESSION_MINIMAP_QUALITY_KEY = 'session_minimap_quality';
 export const SESSION_FPS_TARGET_KEY = 'session_fps_target';
 export const SESSION_RENDER_QUALITY_KEY = 'session_render_quality';
 
@@ -57,6 +61,7 @@ const DEFAULT_AIM_ASSIST: AimAssistLevel = 'low';
 const DEFAULT_CAMERA_SMOOTHING = 0.2;
 const DEFAULT_GM_NARRATION_ENABLED = true;
 const DEFAULT_GM_VOICE_ENABLED = false;
+const DEFAULT_GM_VOICE_VOLUME = 1;
 const DEFAULT_GM_NARRATION_DURATION_MS = 5_200;
 const GM_NARRATION_DURATION_MIN_MS = 4_000;
 const GM_NARRATION_DURATION_MAX_MS = 6_000;
@@ -92,6 +97,12 @@ export function ensureSessionSettings(registry: SessionRegistry): void {
     registry.set(SESSION_GM_VOICE_ENABLED_KEY, DEFAULT_GM_VOICE_ENABLED);
   }
   if (registry.get(SESSION_GM_NARRATION_DEBUG_KEY) === undefined) registry.set(SESSION_GM_NARRATION_DEBUG_KEY, false);
+  if (registry.get(SESSION_GM_VOICE_VOLUME_KEY) === undefined) {
+    registry.set(SESSION_GM_VOICE_VOLUME_KEY, DEFAULT_GM_VOICE_VOLUME);
+  }
+  if (registry.get(SESSION_MINIMAP_QUALITY_KEY) === undefined) {
+    registry.set(SESSION_MINIMAP_QUALITY_KEY, DEFAULT_RENDER_QUALITY);
+  }
   if (registry.get(SESSION_FPS_TARGET_KEY) === undefined) registry.set(SESSION_FPS_TARGET_KEY, DEFAULT_FPS_TARGET);
   if (registry.get(SESSION_RENDER_QUALITY_KEY) === undefined) {
     registry.set(SESSION_RENDER_QUALITY_KEY, DEFAULT_RENDER_QUALITY);
@@ -135,6 +146,32 @@ export function getGameMasterNarrationDebug(registry: SessionRegistry): boolean 
 
 export function setGameMasterNarrationDebug(registry: SessionRegistry, enabled: boolean): void {
   registry.set(SESSION_GM_NARRATION_DEBUG_KEY, enabled);
+  notifySessionSettingsPersist();
+}
+
+export function getGameMasterVoiceVolume(registry: SessionRegistry): number {
+  const v = Number(registry.get(SESSION_GM_VOICE_VOLUME_KEY));
+  if (!Number.isFinite(v)) return DEFAULT_GM_VOICE_VOLUME;
+  return clamp(v, 0, 1);
+}
+
+export function setGameMasterVoiceVolume(registry: SessionRegistry, volume: number): void {
+  registry.set(SESSION_GM_VOICE_VOLUME_KEY, clamp(volume, 0, 1));
+  notifySessionSettingsPersist();
+}
+
+export function adjustGameMasterVoiceVolume(registry: SessionRegistry, delta: number): number {
+  const next = getGameMasterVoiceVolume(registry) + delta;
+  setGameMasterVoiceVolume(registry, next);
+  return getGameMasterVoiceVolume(registry);
+}
+
+export function getMinimapQuality(registry: SessionRegistry): MinimapQualityId {
+  return normalizeMinimapQuality(registry.get(SESSION_MINIMAP_QUALITY_KEY));
+}
+
+export function setMinimapQuality(registry: SessionRegistry, quality: MinimapQualityId): void {
+  registry.set(SESSION_MINIMAP_QUALITY_KEY, normalizeMinimapQuality(quality));
   notifySessionSettingsPersist();
 }
 
