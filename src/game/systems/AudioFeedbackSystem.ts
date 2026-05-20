@@ -34,9 +34,7 @@ export type AudioFeedbackCue =
   | 'ambientIndustrial'
   | 'ambientCorrupt'
   | 'bossPhaseShift'
-  | 'stingerDread'
-  | 'gmRadioBeep'
-  | 'gmTransmission';
+  | 'stingerDread';
 
 export interface AudioFeedbackLayerConfig {
   frequency: number;
@@ -299,21 +297,6 @@ export const AUDIO_FEEDBACK_CONFIG: Record<AudioFeedbackCue, AudioFeedbackConfig
       { frequency: 920, endFrequency: 380, duration: 0.045, volume: 0.011, type: 'sine', delay: 0.018 }
     ],
     throttleMs: 950
-  },
-  gmRadioBeep: {
-    layers: [
-      { frequency: 740, endFrequency: 1180, duration: 0.045, volume: 0.018, type: 'square' },
-      { frequency: 1480, endFrequency: 980, duration: 0.028, volume: 0.008, type: 'sine', delay: 0.012 }
-    ],
-    throttleMs: 220
-  },
-  gmTransmission: {
-    layers: [
-      { frequency: 95, endFrequency: 55, duration: 0.14, volume: 0.016, type: 'sawtooth' },
-      { frequency: 2100, endFrequency: 1600, duration: 0.09, volume: 0.0055, type: 'sine', delay: 0.008 },
-      { frequency: 420, endFrequency: 280, duration: 0.06, volume: 0.009, type: 'triangle', delay: 0.04 }
-    ],
-    throttleMs: 280
   }
 };
 

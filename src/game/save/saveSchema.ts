@@ -29,6 +29,7 @@ export interface PersistedSettings {
   preferFullscreen: boolean;
   aimAssist: AimAssistLevel;
   cameraSmoothing: number;
+  fovScale: number;
 }
 
 export interface RaycastStatistics {
@@ -110,7 +111,8 @@ export function createDefaultSettings(): PersistedSettings {
     touchJoystickDeadzone: 0.18,
     preferFullscreen: false,
     aimAssist: 'low',
-    cameraSmoothing: 0.2
+    cameraSmoothing: 0.22,
+    fovScale: 1.2
   };
 }
 
@@ -220,7 +222,8 @@ function sanitizeSettings(value: unknown): PersistedSettings {
       value.aimAssist === 'off' || value.aimAssist === 'low' || value.aimAssist === 'normal'
         ? value.aimAssist
         : defaults.aimAssist,
-    cameraSmoothing: Math.min(0.85, Math.max(0, readNumber(value.cameraSmoothing, defaults.cameraSmoothing)))
+    cameraSmoothing: Math.min(0.85, Math.max(0, readNumber(value.cameraSmoothing, defaults.cameraSmoothing))),
+    fovScale: Math.min(1.25, Math.max(1, readNumber(value.fovScale, defaults.fovScale)))
   };
 }
 

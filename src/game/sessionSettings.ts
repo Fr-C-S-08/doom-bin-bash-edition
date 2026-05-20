@@ -1,5 +1,12 @@
 import type { AimAssistLevel } from './raycast/RaycastLookFeel';
 import { cycleAimAssistLevel } from './raycast/RaycastLookFeel';
+import {
+  RAYCAST_DEFAULT_FOV_SCALE,
+  RAYCAST_FOV_SCALE_MAX,
+  RAYCAST_FOV_SCALE_MIN,
+  RAYCAST_FOV_SCALE_STEPS,
+  raycastFovDegreesFromScale,
+} from './raycast/RaycastRendererConfig';
 
 /** Runtime preferences mirrored in Phaser registry; persisted via SaveManager when hooks are bound. */
 
@@ -19,9 +26,7 @@ export const SESSION_TOUCH_BUTTON_SCALE_KEY = 'session_touch_button_scale';
 export const SESSION_TOUCH_JOYSTICK_DEADZONE_KEY = 'session_touch_joystick_deadzone';
 export const SESSION_AIM_ASSIST_KEY = 'session_aim_assist';
 export const SESSION_CAMERA_SMOOTHING_KEY = 'session_camera_smoothing';
-export const SESSION_GM_NARRATION_ENABLED_KEY = 'session_gm_narration_enabled';
-export const SESSION_GM_NARRATION_DURATION_KEY = 'session_gm_narration_duration_ms';
-export const SESSION_GM_NARRATION_DEBUG_KEY = 'session_gm_narration_debug';
+export const SESSION_FOV_SCALE_KEY = 'session_fov_scale';
 
 export interface SessionRegistry {
   get(key: string): unknown;
@@ -43,10 +48,7 @@ const DEFAULT_TOUCH_LOOK_SENS = 1;
 const DEFAULT_TOUCH_BUTTON_SCALE = 1;
 const DEFAULT_TOUCH_JOYSTICK_DEADZONE = 0.18;
 const DEFAULT_AIM_ASSIST: AimAssistLevel = 'low';
-const DEFAULT_CAMERA_SMOOTHING = 0.2;
-const DEFAULT_GM_NARRATION_ENABLED = true;
-const DEFAULT_GM_NARRATION_DURATION_MS = 5_200;
-const DEFAULT_GM_NARRATION_DEBUG = false;
+const DEFAULT_CAMERA_SMOOTHING = 0.22;
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
@@ -69,15 +71,34 @@ export function ensureSessionSettings(registry: SessionRegistry): void {
   if (registry.get(SESSION_TOUCH_JOYSTICK_DEADZONE_KEY) === undefined) registry.set(SESSION_TOUCH_JOYSTICK_DEADZONE_KEY, DEFAULT_TOUCH_JOYSTICK_DEADZONE);
   if (registry.get(SESSION_AIM_ASSIST_KEY) === undefined) registry.set(SESSION_AIM_ASSIST_KEY, DEFAULT_AIM_ASSIST);
   if (registry.get(SESSION_CAMERA_SMOOTHING_KEY) === undefined) registry.set(SESSION_CAMERA_SMOOTHING_KEY, DEFAULT_CAMERA_SMOOTHING);
-  if (registry.get(SESSION_GM_NARRATION_ENABLED_KEY) === undefined) {
-    registry.set(SESSION_GM_NARRATION_ENABLED_KEY, DEFAULT_GM_NARRATION_ENABLED);
-  }
-  if (registry.get(SESSION_GM_NARRATION_DURATION_KEY) === undefined) {
-    registry.set(SESSION_GM_NARRATION_DURATION_KEY, DEFAULT_GM_NARRATION_DURATION_MS);
-  }
-  if (registry.get(SESSION_GM_NARRATION_DEBUG_KEY) === undefined) {
-    registry.set(SESSION_GM_NARRATION_DEBUG_KEY, DEFAULT_GM_NARRATION_DEBUG);
-  }
+  if (registry.get(SESSION_FOV_SCALE_KEY) === undefined) registry.set(SESSION_FOV_SCALE_KEY, RAYCAST_DEFAULT_FOV_SCALE);
+}
+
+export function getRaycastFovScale(registry: SessionRegistry): number {
+  const v = Number(registry.get(SESSION_FOV_SCALE_KEY));
+  if (!Number.isFinite(v)) return RAYCAST_DEFAULT_FOV_SCALE;
+  return clamp(v, RAYCAST_FOV_SCALE_MIN, RAYCAST_FOV_SCALE_MAX);
+}
+
+export function setRaycastFovScale(registry: SessionRegistry, scale: number): void {
+  registry.set(SESSION_FOV_SCALE_KEY, clamp(scale, RAYCAST_FOV_SCALE_MIN, RAYCAST_FOV_SCALE_MAX));
+  notifySessionSettingsPersist();
+}
+
+export function cycleRaycastFovScale(registry: SessionRegistry, direction: number): number {
+  const current = getRaycastFovScale(registry);
+  const steps = RAYCAST_FOV_SCALE_STEPS;
+  const idx = steps.findIndex((s) => Math.abs(s - current) < 0.001);
+  const base = idx >= 0 ? idx : steps.indexOf(RAYCAST_DEFAULT_FOV_SCALE);
+  const next = steps[(base + direction + steps.length) % steps.length];
+  setRaycastFovScale(registry, next);
+  return next;
+}
+
+export function formatRaycastFovScaleLabel(scale: number): string {
+  const pct = Math.round(scale * 100);
+  const deg = Math.round(raycastFovDegreesFromScale(scale));
+  return `${pct}% (${deg}°)`;
 }
 
 export function getMouseSensitivity(registry: SessionRegistry): number {
@@ -256,45 +277,6 @@ export function getCameraSmoothing(registry: SessionRegistry): number {
 
 export function setCameraSmoothing(registry: SessionRegistry, value: number): void {
   registry.set(SESSION_CAMERA_SMOOTHING_KEY, clamp(value, 0, 0.85));
-  notifySessionSettingsPersist();
-}
-
-export function getGameMasterNarrationEnabled(registry: SessionRegistry): boolean {
-  const v = registry.get(SESSION_GM_NARRATION_ENABLED_KEY);
-  if (v === false) return false;
-  return true;
-}
-
-export function setGameMasterNarrationEnabled(registry: SessionRegistry, enabled: boolean): void {
-  registry.set(SESSION_GM_NARRATION_ENABLED_KEY, enabled);
-  notifySessionSettingsPersist();
-}
-
-export function getGameMasterNarrationDurationMs(registry: SessionRegistry): number {
-  const v = Number(registry.get(SESSION_GM_NARRATION_DURATION_KEY));
-  if (!Number.isFinite(v)) return DEFAULT_GM_NARRATION_DURATION_MS;
-  return Math.round(clamp(v, 2_500, 9_000));
-}
-
-export function setGameMasterNarrationDurationMs(registry: SessionRegistry, ms: number): void {
-  registry.set(SESSION_GM_NARRATION_DURATION_KEY, Math.round(clamp(ms, 2_500, 9_000)));
-  notifySessionSettingsPersist();
-}
-
-export function cycleGameMasterNarrationDurationMs(registry: SessionRegistry, direction: number): number {
-  const step = 400 * Math.sign(direction || 1);
-  const next = getGameMasterNarrationDurationMs(registry) + step;
-  const wrapped = next > 9_000 ? 2_500 : next < 2_500 ? 9_000 : next;
-  setGameMasterNarrationDurationMs(registry, wrapped);
-  return wrapped;
-}
-
-export function getGameMasterNarrationDebug(registry: SessionRegistry): boolean {
-  return registry.get(SESSION_GM_NARRATION_DEBUG_KEY) === true;
-}
-
-export function setGameMasterNarrationDebug(registry: SessionRegistry, enabled: boolean): void {
-  registry.set(SESSION_GM_NARRATION_DEBUG_KEY, enabled);
   notifySessionSettingsPersist();
 }
 

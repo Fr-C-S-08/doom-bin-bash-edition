@@ -15,6 +15,7 @@ import {
   getTouchLookSensitivity,
   getAimAssistLevel,
   getCameraSmoothing,
+  getRaycastFovScale,
   registerSessionSettingsPersistHook,
   SESSION_GAMEPAD_DEADZONE_KEY,
   SESSION_GAMEPAD_INVERT_Y_KEY,
@@ -32,6 +33,7 @@ import {
   SESSION_TOUCH_LOOK_SENS_KEY,
   SESSION_AIM_ASSIST_KEY,
   SESSION_CAMERA_SMOOTHING_KEY,
+  SESSION_FOV_SCALE_KEY,
   type SessionRegistry
 } from '../sessionSettings';
 import { getSaveManager } from './SaveManager';
@@ -54,7 +56,8 @@ function readSettingsFromRegistry(registry: SessionRegistry): PersistedSettings 
     touchJoystickDeadzone: getTouchJoystickDeadzone(registry),
     preferFullscreen: getSaveManager().getSettings().preferFullscreen,
     aimAssist: getAimAssistLevel(registry),
-    cameraSmoothing: getCameraSmoothing(registry)
+    cameraSmoothing: getCameraSmoothing(registry),
+    fovScale: getRaycastFovScale(registry)
   };
 }
 
@@ -75,6 +78,7 @@ function applySettingsToRegistry(registry: SessionRegistry, settings: PersistedS
   registry.set(SESSION_TOUCH_JOYSTICK_DEADZONE_KEY, settings.touchJoystickDeadzone);
   registry.set(SESSION_AIM_ASSIST_KEY, settings.aimAssist);
   registry.set(SESSION_CAMERA_SMOOTHING_KEY, settings.cameraSmoothing);
+  registry.set(SESSION_FOV_SCALE_KEY, settings.fovScale);
 }
 
 export function hydrateSessionSettings(registry: SessionRegistry): void {

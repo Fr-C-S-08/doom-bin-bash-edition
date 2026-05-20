@@ -106,7 +106,7 @@ export function smoothTurnRate(
   const amount = clamp(smoothing, 0, 1);
   if (amount <= 0.001 || deltaSeconds <= 0) return targetRate;
   // Higher smoothing = lower alpha (more filtering) but capped to stay responsive.
-  const alpha = clamp(1 - amount * 0.82, 0.22, 1);
+  const alpha = clamp(1 - amount * 0.82, 0.26, 1);
   const frameAlpha = 1 - Math.pow(1 - alpha, Math.max(1, deltaSeconds * 60));
   return previousRate + (targetRate - previousRate) * frameAlpha;
 }
