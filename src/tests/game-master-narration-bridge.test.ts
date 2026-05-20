@@ -78,7 +78,9 @@ describe('gameMasterNarrationBridge', () => {
     });
     expect(deliver).not.toHaveBeenCalled();
 
-    await vi.waitFor(() => expect(deliver).toHaveBeenCalledWith('El trono vibra. Dispara.'));
+    await vi.waitFor(() =>
+      expect(deliver).toHaveBeenCalledWith('El trono vibra. Dispara.', 'ollama', 'critical'),
+    );
   });
 
   it('isNarrationInFlight reflects async request lifecycle', async () => {
@@ -117,6 +119,52 @@ describe('gameMasterNarrationBridge', () => {
     expect(requestNarration).toHaveBeenCalledTimes(1);
 
     resolveRequest({ message: 'Aguanta.', source: 'ollama' });
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledOnce());
+  });
+
+  it('queues one high-priority event while narration is in flight', async () => {
+    const deliver = vi.fn();
+    let resolveFirst: (value: { message: string; source: 'ollama' }) => void = () => {};
+    const requestNarration = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<{ message: string; source: 'ollama' }>((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({ message: 'Crítico.', source: 'ollama' });
+
+    const bridge = new GameMasterNarrationBridge(deliver, { requestNarration });
+    bridge.requestEvent('pickup_key', SNAPSHOT, { dedupeKey: 'pickup_key:volt-throne:key-a' });
+    bridge.requestEvent('low_health', { ...SNAPSHOT, playerHealthPercent: 18, nowMs: 14_000 }, {
+      dedupeKey: 'low_health:volt-throne:hp1',
+    });
+
+    expect(requestNarration).toHaveBeenCalledTimes(1);
+
+    resolveFirst({ message: 'Llave.', source: 'ollama' });
+    await vi.waitFor(() => expect(requestNarration).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(2));
+  });
+
+  it('drops low-priority pickups while narration is in flight', async () => {
+    const deliver = vi.fn();
+    let resolveRequest: (value: { message: string; source: 'ollama' }) => void = () => {};
+    const requestNarration = vi.fn(
+      () =>
+        new Promise<{ message: string; source: 'ollama' }>((resolve) => {
+          resolveRequest = resolve;
+        }),
+    );
+
+    const bridge = new GameMasterNarrationBridge(deliver, { requestNarration });
+    bridge.requestEvent('boss_spawn', SNAPSHOT, { dedupeKey: 'boss_spawn:volt-throne:volt-archon' });
+    bridge.requestEvent('pickup_health', SNAPSHOT, { dedupeKey: 'pickup_health:volt-throne:cell-a' });
+
+    expect(requestNarration).toHaveBeenCalledTimes(1);
+
+    resolveRequest({ message: 'Jefe.', source: 'ollama' });
     await vi.waitFor(() => expect(deliver).toHaveBeenCalledOnce());
   });
 });

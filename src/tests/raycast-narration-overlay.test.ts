@@ -20,11 +20,12 @@ const CONFIG = {
 } as const;
 
 describe('RaycastNarrationOverlay helpers', () => {
-  it('buildRaycastNarrationLayout keeps the panel in the lower-left HUD band', () => {
+  it('buildRaycastNarrationLayout keeps a compact top-left radio band', () => {
     const layout = buildRaycastNarrationLayout(960, 540);
-    expect(layout.centerX).toBeLessThan(400);
-    expect(layout.centerY).toBeGreaterThan(400);
-    expect(layout.panelWidth).toBeGreaterThan(300);
+    expect(layout.originX).toBeLessThan(120);
+    expect(layout.originY).toBeGreaterThan(200);
+    expect(layout.originY).toBeLessThan(420);
+    expect(layout.panelHeight).toBeLessThanOrEqual(72);
     expect(layout.bodyWrapWidth).toBeLessThan(layout.panelWidth);
   });
 
@@ -47,21 +48,29 @@ describe('RaycastNarrationOverlay helpers', () => {
   it('enqueueNarrationMessage queues while a line is active', () => {
     const active = {
       message: 'Activa',
+      pages: ['Activa'],
+      pageIndex: 0,
+      tier: 'ambient' as const,
       phase: 'hold' as const,
       phaseStartedAtMs: 1_000,
       displayMs: 3_000,
+      typewriterStartedAtMs: 1_000,
     };
     const state = enqueueNarrationMessage({ pending: [], active, queueCooldownUntilMs: 0 }, 'Siguiente');
-    expect(state.pending).toEqual(['Siguiente']);
+    expect(state.pending).toEqual([{ message: 'Siguiente', tier: 'ambient' }]);
     expect(state.active?.message).toBe('Activa');
   });
 
   it('computeNarrationOverlayAlpha fades in, holds, then fades out', () => {
     let active: RaycastNarrationActive = {
       message: 'Test',
+      pages: ['Test'],
+      pageIndex: 0,
+      tier: 'ambient',
       phase: 'fadeIn',
       phaseStartedAtMs: 1_000,
       displayMs: 2_000,
+      typewriterStartedAtMs: 1_000,
     };
 
     expect(computeNarrationOverlayAlpha(active, 1_000, CONFIG)).toBe(0);
@@ -80,12 +89,16 @@ describe('RaycastNarrationOverlay helpers', () => {
 
   it('advanceNarrationQueue promotes the next pending line after a short gap', () => {
     const state = {
-      pending: ['Segunda'],
+      pending: [{ message: 'Segunda', tier: 'ambient' as const }],
       active: {
         message: 'Primera',
+        pages: ['Primera'],
+        pageIndex: 0,
+        tier: 'ambient' as const,
         phase: 'fadeOut' as const,
         phaseStartedAtMs: 5_000,
         displayMs: 1_000,
+        typewriterStartedAtMs: 5_000,
       },
       queueCooldownUntilMs: 0,
     };

@@ -1,5 +1,4 @@
 import { formatRaycastActiveInputLine, formatRaycastControlsHelpBlock, type RaycastActiveInputKind } from './RaycastInputHelp';
-
 /** Pause menu labels shared by RaycastScene — keeps the gameplay scene slimmer. */
 
 export const RAYCAST_PAUSE_MENU_LABELS = [
@@ -37,12 +36,25 @@ export const RAYCAST_PAUSE_MENU_ACTIONS: RaycastPauseMenuAction[] = [
   'debug',
 ];
 
-export const RAYCAST_SETTINGS_PAUSE_ROWS = [
+export const RAYCAST_SETTINGS_GM_ROWS = [
   'gm_narration',
   'gm_voice',
+  'gm_voice_volume',
   'gm_test',
+] as const;
+
+export const RAYCAST_SETTINGS_PERF_ROWS = [
   'fps_target',
   'render_quality',
+  'minimap_quality',
+] as const;
+
+export const RAYCAST_SETTINGS_DEBUG_ROWS = ['debug_perf_hud', 'debug_gm_logs'] as const;
+
+export const RAYCAST_SETTINGS_PAUSE_ROWS = [
+  ...RAYCAST_SETTINGS_GM_ROWS,
+  ...RAYCAST_SETTINGS_PERF_ROWS,
+  ...RAYCAST_SETTINGS_DEBUG_ROWS,
   'back',
 ] as const;
 
@@ -92,10 +104,14 @@ export interface RaycastSettingsPauseModel {
   selectionIndex: number;
   gmNarration: string;
   gmVoice: string;
+  gmVoiceVolume: string;
   gmStatus: string;
   gmTestHint: string;
   fpsTarget: string;
   renderQuality: string;
+  minimapQuality: string;
+  debugPerfHud: string;
+  debugGmLogs: string;
 }
 
 export interface RaycastControlPauseModel {
@@ -118,12 +134,23 @@ function formatSectionHeader(title: string): string {
   return `// ${title}`;
 }
 
+function formatSettingsRow(
+  rowId: RaycastSettingsPauseRow,
+  label: string,
+  value: string,
+  selectionIndex: number,
+): string {
+  const idx = RAYCAST_SETTINGS_PAUSE_ROWS.indexOf(rowId);
+  const prefix = idx === selectionIndex ? '>' : ' ';
+  return `${prefix} ${label.padEnd(16)} ${value}`;
+}
+
 /**
  * Menú de pausa principal: columnas compactas, controles resumidos, menú al final.
  */
 export function formatRaycastPauseMenuMxBody(
   model: RaycastPauseMenuMxModel,
-  opts?: { columnChars?: number }
+  opts?: { columnChars?: number },
 ): string {
   const w = opts?.columnChars ?? DEFAULT_COL_CHARS;
   const L = (s: string) => truncatePauseField(s, w);
@@ -175,9 +202,13 @@ export function formatRaycastPauseMenuMxBody(
 const SETTINGS_ROW_LABELS: Record<RaycastSettingsPauseRow, string> = {
   gm_narration: 'Narración',
   gm_voice: 'Voz',
-  gm_test: 'Probar GM',
+  gm_voice_volume: 'Volumen voz',
+  gm_test: 'Probar voz GM',
   fps_target: 'FPS objetivo',
   render_quality: 'Calidad render',
+  minimap_quality: 'Minimapa calidad',
+  debug_perf_hud: 'HUD perf',
+  debug_gm_logs: 'Logs GM',
   back: 'Volver',
 };
 
@@ -185,34 +216,44 @@ export function formatRaycastSettingsPauseBody(model: RaycastSettingsPauseModel)
   const valueByRow: Record<RaycastSettingsPauseRow, string> = {
     gm_narration: model.gmNarration,
     gm_voice: model.gmVoice,
+    gm_voice_volume: model.gmVoiceVolume,
     gm_test: model.gmTestHint,
     fps_target: model.fpsTarget,
     render_quality: model.renderQuality,
+    minimap_quality: model.minimapQuality,
+    debug_perf_hud: model.debugPerfHud,
+    debug_gm_logs: model.debugGmLogs,
     back: 'menú de pausa',
   };
 
   const lines: string[] = [
-    'AJUSTES — GAME MASTER / PERFORMANCE',
+    'AJUSTES',
     formatRaycastActiveInputLine(model.activeInput),
-    `Estado GM · ${model.gmStatus}`,
+    `Estado · ${model.gmStatus}`,
     '',
     formatSectionHeader('GAME MASTER'),
   ];
 
-  for (const rowId of ['gm_narration', 'gm_voice', 'gm_test'] as const) {
-    const idx = RAYCAST_SETTINGS_PAUSE_ROWS.indexOf(rowId);
-    const prefix = idx === model.selectionIndex ? '>' : ' ';
-    lines.push(`${prefix} ${SETTINGS_ROW_LABELS[rowId].padEnd(16)} ${valueByRow[rowId]}`);
+  for (const rowId of RAYCAST_SETTINGS_GM_ROWS) {
+    lines.push(formatSettingsRow(rowId, SETTINGS_ROW_LABELS[rowId], valueByRow[rowId], model.selectionIndex));
   }
 
   lines.push('', formatSectionHeader('PERFORMANCE'));
-  for (const rowId of ['fps_target', 'render_quality', 'back'] as const) {
-    const idx = RAYCAST_SETTINGS_PAUSE_ROWS.indexOf(rowId);
-    const prefix = idx === model.selectionIndex ? '>' : ' ';
-    lines.push(`${prefix} ${SETTINGS_ROW_LABELS[rowId].padEnd(16)} ${valueByRow[rowId]}`);
+  for (const rowId of RAYCAST_SETTINGS_PERF_ROWS) {
+    lines.push(formatSettingsRow(rowId, SETTINGS_ROW_LABELS[rowId], valueByRow[rowId], model.selectionIndex));
   }
 
-  lines.push('', '↑↓ · ←→ cambiar · ENTER · ESC volver');
+  lines.push('', formatSectionHeader('DEBUG'));
+  for (const rowId of RAYCAST_SETTINGS_DEBUG_ROWS) {
+    lines.push(formatSettingsRow(rowId, SETTINGS_ROW_LABELS[rowId], valueByRow[rowId], model.selectionIndex));
+  }
+
+  lines.push(
+    '',
+    formatSettingsRow('back', SETTINGS_ROW_LABELS.back, valueByRow.back, model.selectionIndex),
+    '',
+    '↑↓ navegar · ←→ cambiar · ENTER · ESC',
+  );
   return lines.join('\n');
 }
 

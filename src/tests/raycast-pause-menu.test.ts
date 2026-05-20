@@ -80,19 +80,25 @@ describe('raycast pause menu formatting', () => {
       selectionIndex: 0,
       gmNarration: 'SÍ',
       gmVoice: 'NO',
+      gmVoiceVolume: '100%',
       gmStatus: 'idle',
-      gmTestHint: 'ENTER prueba · G en juego',
+      gmTestHint: 'ENTER voz · G en juego',
       fpsTarget: '60 (objetivo)',
       renderQuality: 'Balanceado',
+      minimapQuality: 'Media',
+      debugPerfHud: 'NO',
+      debugGmLogs: 'NO',
     });
 
     expect(body).toContain('// GAME MASTER');
     expect(body).toContain('Narración');
-    expect(body).toContain('Voz');
-    expect(body).toContain('Estado GM · idle');
+    expect(body).toContain('Volumen voz');
+    expect(body).toContain('Estado · idle');
     expect(body).toContain('// PERFORMANCE');
-    expect(body).toContain('FPS objetivo');
-    expect(RAYCAST_SETTINGS_PAUSE_ROWS).toContain('gm_voice');
-    expect(RAYCAST_SETTINGS_PAUSE_ROWS).toContain('fps_target');
+    expect(body).toContain('Minimapa calidad');
+    expect(body).toContain('// DEBUG');
+    expect(body).toContain('HUD perf');
+    expect(RAYCAST_SETTINGS_PAUSE_ROWS).toContain('gm_voice_volume');
+    expect(RAYCAST_SETTINGS_PAUSE_ROWS).toContain('debug_gm_logs');
   });
 });

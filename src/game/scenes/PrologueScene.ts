@@ -143,7 +143,7 @@ export class PrologueScene extends Phaser.Scene {
     };
 
     this.add
-      .text(width * 0.5, layout.titleY, 'DOOM BIN BASH EDITION', {
+      .text(layout.centerX, layout.titleY, 'DOOM BIN BASH EDITION', {
         ...textStyle,
         fontSize: layout.fontTitle,
         color: ACCENT_COLOR,
@@ -153,54 +153,48 @@ export class PrologueScene extends Phaser.Scene {
       .setAlpha(0.88)
       .setDepth(4);
 
-    const missionOriginX = layout.twoColumn ? layout.missionColumnX : width * 0.5;
-    const missionAlign = layout.twoColumn ? 'right' : 'center';
-
     this.add
-      .text(missionOriginX, layout.missionY, `// MISIÓN\n${copy.missionBlock.replace(/^MISIÓN:\n/, '')}`, {
+      .text(layout.missionX, layout.missionY, `// MISIÓN\n${copy.missionBlock.replace(/^MISIÓN:\n/, '')}`, {
         fontFamily: 'monospace',
         fontSize: layout.fontBody,
         fontStyle: '700',
         color: BODY_COLOR,
-        align: missionAlign,
+        align: 'center',
         lineSpacing: 8,
         wordWrap: { width: layout.columnWidth }
       })
-      .setOrigin(layout.twoColumn ? 1 : 0.5, 0)
+      .setOrigin(0.5, 0)
       .setDepth(4);
 
     this.add
-      .text(missionOriginX, layout.objectiveY, `// OBJETIVO\n${copy.objectiveBlock.replace(/^OBJETIVO:\n/, '')}`, {
+      .text(layout.objectiveX, layout.objectiveY, `// OBJETIVO\n${copy.objectiveBlock.replace(/^OBJETIVO:\n/, '')}`, {
         fontFamily: 'monospace',
         fontSize: layout.fontBody,
         fontStyle: '700',
         color: ACCENT_COLOR,
-        align: missionAlign,
+        align: 'center',
         lineSpacing: 7,
         wordWrap: { width: layout.columnWidth }
       })
-      .setOrigin(layout.twoColumn ? 1 : 0.5, 0)
+      .setOrigin(0.5, 0)
       .setDepth(4);
 
-    const controlsOriginX = layout.twoColumn ? layout.controlsColumnX : width * 0.5;
-    const controlsAlign = layout.twoColumn ? 'left' : 'center';
-
     this.add
-      .text(controlsOriginX, layout.controlsY, `// CONTROLES\n${copy.controlsBlock}`, {
+      .text(layout.controlsX, layout.controlsY, `// CONTROLES\n${copy.controlsBlock}`, {
         fontFamily: 'monospace',
         fontSize: layout.fontSmall,
         fontStyle: '700',
         color: MUTED_COLOR,
-        align: controlsAlign,
+        align: 'center',
         lineSpacing: 5,
         wordWrap: { width: layout.columnWidth }
       })
-      .setOrigin(layout.twoColumn ? 0 : 0.5, 0)
+      .setOrigin(0.5, 0)
       .setAlpha(0.94)
       .setDepth(4);
 
     this.modifierText = this.add
-      .text(width * 0.5, layout.modifierY, this.buildModifierPrompt(), {
+      .text(layout.centerX, layout.modifierY, this.buildModifierPrompt(), {
         fontFamily: 'monospace',
         fontSize: layout.fontSmall,
         backgroundColor: '#05120ccc',
@@ -215,7 +209,7 @@ export class PrologueScene extends Phaser.Scene {
       .setAlpha(0.96);
 
     this.promptText = this.add
-      .text(width * 0.5, layout.promptY, `${copy.continueLine}\n${copy.backLine}`, {
+      .text(layout.centerX, layout.promptY, `${copy.continueLine}\n${copy.backLine}`, {
         fontFamily: 'monospace',
         fontSize: layout.fontSmall,
         color: ACCENT_COLOR,
@@ -228,7 +222,7 @@ export class PrologueScene extends Phaser.Scene {
       .setDepth(5);
 
     this.gamepadStatusText = this.add
-      .text(width * 0.5, layout.gamepadY, '', {
+      .text(layout.centerX, layout.gamepadY, '', {
         fontFamily: 'monospace',
         fontSize: '10px',
         color: '#9ef0cf',

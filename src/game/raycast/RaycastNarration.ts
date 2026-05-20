@@ -1,9 +1,16 @@
-export interface RaycastNarrationLayout {
+import type { GameMasterNarrationTier } from '../../services/gameMasterNarrationTypes';
+import {
+  buildRadioTransmissionLayout,
+  isRadioTypewriterComplete,
+  paginateRadioTransmissionText,
+  sanitizeRadioDisplayText,
+  type RadioTransmissionLayout,
+} from './RaycastRadioTransmission';
+
+export interface RaycastNarrationLayout extends RadioTransmissionLayout {
+  /** @deprecated Prefer originX/originY — kept for tests. */
   centerX: number;
   centerY: number;
-  panelWidth: number;
-  panelHeight: number;
-  bodyWrapWidth: number;
 }
 
 export interface RaycastNarrationOverlayConfig {
@@ -13,17 +20,26 @@ export interface RaycastNarrationOverlayConfig {
   maxQueue?: number;
 }
 
+export interface RaycastNarrationPendingEntry {
+  message: string;
+  tier: GameMasterNarrationTier;
+}
+
 export interface RaycastNarrationQueueState {
-  pending: string[];
+  pending: RaycastNarrationPendingEntry[];
   active: RaycastNarrationActive | null;
   queueCooldownUntilMs: number;
 }
 
 export interface RaycastNarrationActive {
   message: string;
+  pages: string[];
+  pageIndex: number;
+  tier: GameMasterNarrationTier;
   phase: 'fadeIn' | 'hold' | 'fadeOut';
   phaseStartedAtMs: number;
   displayMs: number;
+  typewriterStartedAtMs: number;
 }
 
 export const RAYCAST_NARRATION_DEFAULT_DISPLAY_MS = 5_200;
@@ -46,15 +62,33 @@ function clamp01(value: number): number {
 }
 
 export function buildRaycastNarrationLayout(width: number, height: number): RaycastNarrationLayout {
-  const panelWidth = Math.max(280, Math.min(420, Math.round(width * 0.4)));
-  const panelHeight = 108;
-  const marginX = 20;
+  const compact = width <= 960 || height <= 540;
+  const panelWidth = Math.min(248, Math.max(196, Math.round(width * 0.26)));
+  const panelHeight = 68;
+  const originX = 24;
+  const minimapStack = compact ? 150 : 184;
+  const originY = 24 + minimapStack + 10;
   return {
-    centerX: marginX + panelWidth * 0.5,
-    centerY: height - 124,
+    originX,
+    originY,
     panelWidth,
     panelHeight,
-    bodyWrapWidth: panelWidth - 40,
+    bodyWrapWidth: panelWidth - 14,
+    liveIndicatorX: originX + panelWidth - 6,
+    liveIndicatorY: originY + 4,
+    centerX: originX + panelWidth * 0.5,
+    centerY: originY + panelHeight * 0.5,
+  };
+}
+
+export function buildRaycastNarrationLayoutFromHud(
+  hud: Parameters<typeof buildRadioTransmissionLayout>[0],
+): RaycastNarrationLayout {
+  const radio = buildRadioTransmissionLayout(hud);
+  return {
+    ...radio,
+    centerX: radio.originX + radio.panelWidth * 0.5,
+    centerY: radio.originY + radio.panelHeight * 0.5,
   };
 }
 
@@ -77,30 +111,66 @@ export function enqueueNarrationMessage(
   maxQueue = RAYCAST_NARRATION_MAX_QUEUE,
   nowMs = 0,
   displayMs = RAYCAST_NARRATION_DEFAULT_DISPLAY_MS,
+  tier: GameMasterNarrationTier = 'ambient',
 ): RaycastNarrationQueueState {
   const normalized = normalizeNarrationMessage(message);
   if (!normalized) return state;
 
+  const entry: RaycastNarrationPendingEntry = { message: normalized, tier };
+
   if (!state.active) {
     return {
       ...state,
-      active: startNarrationActive(normalized, nowMs, displayMs),
+      active: startNarrationActive(normalized, nowMs, displayMs, tier),
     };
   }
 
-  const pending = [...state.pending, normalized].slice(-maxQueue);
+  if (tier === 'critical') {
+    return {
+      pending: [],
+      active: startNarrationActive(normalized, nowMs, displayMs, tier),
+      queueCooldownUntilMs: 0,
+    };
+  }
+
+  if (tier === 'important' && state.active.tier === 'ambient') {
+    const pending = mergeNarrationPending(state.pending, entry, maxQueue);
+    return {
+      pending,
+      active: startNarrationActive(normalized, nowMs, displayMs, tier),
+      queueCooldownUntilMs: 0,
+    };
+  }
+
+  const pending = mergeNarrationPending(state.pending, entry, maxQueue);
   return { ...state, pending };
+}
+
+function mergeNarrationPending(
+  pending: RaycastNarrationPendingEntry[],
+  entry: RaycastNarrationPendingEntry,
+  maxQueue: number,
+): RaycastNarrationPendingEntry[] {
+  const withoutAmbient =
+    entry.tier === 'important' ? pending.filter((p) => p.tier !== 'ambient') : pending;
+  return [...withoutAmbient, entry].slice(-maxQueue);
 }
 
 function startNarrationActive(
   message: string,
   nowMs: number,
   displayMs: number,
+  tier: GameMasterNarrationTier,
 ): RaycastNarrationActive {
+  const pages = paginateRadioTransmissionText(message);
   return {
     message,
+    pages: pages.length > 0 ? pages : [message],
+    pageIndex: 0,
+    tier,
     phase: 'fadeIn',
     phaseStartedAtMs: nowMs,
+    typewriterStartedAtMs: nowMs,
     displayMs: Math.max(1_800, Math.min(9_000, displayMs)),
   };
 }
@@ -140,16 +210,29 @@ export function advanceNarrationQueue(
   }
 
   const pending = [...state.pending];
-  const nextMessage = pending.shift();
-  if (!nextMessage) {
+  const nextEntry = pickNextNarrationPending(pending);
+  if (!nextEntry) {
     return { pending: [], active: null, queueCooldownUntilMs: 0 };
   }
 
+  const remaining = pending.filter((entry) => entry !== nextEntry);
+
   return {
-    pending,
-    active: startNarrationActive(nextMessage, nowMs, config.displayMs),
+    pending: remaining,
+    active: startNarrationActive(nextEntry.message, nowMs, config.displayMs, nextEntry.tier),
     queueCooldownUntilMs: 0,
   };
+}
+
+function pickNextNarrationPending(
+  pending: RaycastNarrationPendingEntry[],
+): RaycastNarrationPendingEntry | null {
+  if (pending.length === 0) return null;
+  const critical = pending.find((entry) => entry.tier === 'critical');
+  if (critical) return critical;
+  const important = pending.find((entry) => entry.tier === 'important');
+  if (important) return important;
+  return pending[pending.length - 1] ?? null;
 }
 
 export function computeNarrationOverlayAlpha(
@@ -175,20 +258,41 @@ export function computeNarrationOverlayAlpha(
   return clamp01(1 - elapsed / config.fadeOutMs);
 }
 
+export function tickNarrationTypewriterPages(
+  active: RaycastNarrationActive,
+  nowMs: number,
+): RaycastNarrationActive {
+  const pageText = active.pages[active.pageIndex] ?? active.message;
+  const displayPage = sanitizeRadioDisplayText(pageText);
+  if (!isRadioTypewriterComplete(displayPage, active.typewriterStartedAtMs, nowMs)) {
+    return active;
+  }
+  if (active.pageIndex >= active.pages.length - 1) return active;
+  return {
+    ...active,
+    pageIndex: active.pageIndex + 1,
+    typewriterStartedAtMs: nowMs,
+  };
+}
+
 export function tickNarrationPhase(
   active: RaycastNarrationActive,
   nowMs: number,
   config: Required<RaycastNarrationOverlayConfig>,
 ): RaycastNarrationActive {
-  const elapsed = Math.max(0, nowMs - active.phaseStartedAtMs);
+  const next = tickNarrationTypewriterPages(active, nowMs);
+  const elapsed = Math.max(0, nowMs - next.phaseStartedAtMs);
+  const onLastPage = next.pageIndex >= next.pages.length - 1;
+  const pageText = sanitizeRadioDisplayText(next.pages[next.pageIndex] ?? next.message);
+  const typedDone = isRadioTypewriterComplete(pageText, next.typewriterStartedAtMs, nowMs);
 
-  if (active.phase === 'fadeIn' && elapsed >= config.fadeInMs) {
-    return { ...active, phase: 'hold', phaseStartedAtMs: nowMs };
+  if (next.phase === 'fadeIn' && elapsed >= config.fadeInMs) {
+    return { ...next, phase: 'hold', phaseStartedAtMs: nowMs };
   }
 
-  if (active.phase === 'hold' && elapsed >= active.displayMs) {
-    return { ...active, phase: 'fadeOut', phaseStartedAtMs: nowMs };
+  if (next.phase === 'hold' && typedDone && onLastPage && elapsed >= next.displayMs) {
+    return { ...next, phase: 'fadeOut', phaseStartedAtMs: nowMs };
   }
 
-  return active;
+  return next;
 }

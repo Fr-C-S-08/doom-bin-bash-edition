@@ -17,9 +17,10 @@ describe('GameMasterHudStatus', () => {
         narrationEnabled: true,
         inFlight: false,
         voiceEnabled: true,
+        lastTier: 'critical',
         lastSource: 'ollama',
       }),
-    ).toBe('GM idle | voice on | src ollama');
+    ).toBe('GM idle (critical) | voice on | src ollama');
 
     expect(
       formatGameMasterHudStatusLine({

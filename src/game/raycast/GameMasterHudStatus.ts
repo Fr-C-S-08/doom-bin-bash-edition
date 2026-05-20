@@ -1,4 +1,6 @@
 import type { GameMasterSource } from '../../services/gameMasterClient';
+import { formatGameMasterTierHudLabel, type GameMasterNarrationTier } from '../../services/gameMasterNarrationTypes';
+import { formatGameMasterVoiceHudLabel } from '../../services/gameMasterVoice';
 
 export type GameMasterHudActivity = 'off' | 'idle' | 'pending';
 
@@ -15,11 +17,15 @@ export function formatGameMasterHudStatusLine(input: {
   narrationEnabled: boolean;
   inFlight: boolean;
   voiceEnabled: boolean;
+  lastTier?: GameMasterNarrationTier | null;
   lastSource?: GameMasterSource | null;
 }): string {
   const activity = resolveGameMasterHudActivity(input.narrationEnabled, input.inFlight);
-  const voice = input.voiceEnabled ? 'on' : 'off';
+  const voice = formatGameMasterVoiceHudLabel(input.voiceEnabled);
+  const tierSuffix = input.narrationEnabled
+    ? ` (${formatGameMasterTierHudLabel(input.lastTier ?? null)})`
+    : '';
   const sourceSuffix =
     input.narrationEnabled && input.lastSource ? ` | src ${input.lastSource}` : '';
-  return `GM ${activity} | voice ${voice}${sourceSuffix}`;
+  return `GM ${activity}${tierSuffix} | voice ${voice}${sourceSuffix}`;
 }

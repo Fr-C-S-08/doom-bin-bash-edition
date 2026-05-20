@@ -1,8 +1,9 @@
 import Phaser from 'phaser';
+import type { GameMasterNarrationTier } from '../../services/gameMasterNarrationTypes';
+import { isGameMasterVoiceSpeaking } from '../../services/gameMasterVoice';
 import type { RaycastHudCssBundle } from './RaycastPalette';
 import {
   advanceNarrationQueue,
-  buildRaycastNarrationLayout,
   computeNarrationOverlayAlpha,
   createRaycastNarrationQueueState,
   enqueueNarrationMessage,
@@ -15,8 +16,13 @@ import {
   type RaycastNarrationOverlayConfig,
   type RaycastNarrationQueueState,
 } from './RaycastNarration';
-import { buildRaycastNarrationFxState } from './RaycastNarrationFx';
+import { computeNarrationFlickerMul } from './RaycastNarrationFx';
 import { RAYCAST_NARRATION_PALETTE } from './RaycastNarrationPalette';
+import {
+  computeRadioTypewriterText,
+  isRadioTypewriterComplete,
+  sanitizeRadioDisplayText,
+} from './RaycastRadioTransmission';
 
 export { pickRaycastNarrationMockLine } from './RaycastNarration';
 export type { RaycastNarrationOverlayConfig } from './RaycastNarration';
@@ -28,31 +34,32 @@ export interface RaycastNarrationOverlayRuntimeOptions {
 
 export class RaycastNarrationOverlay {
   private readonly scene: Phaser.Scene;
-  private readonly layout: RaycastNarrationLayout;
+  private layout: RaycastNarrationLayout;
   private readonly palette = RAYCAST_NARRATION_PALETTE;
   private config: Required<RaycastNarrationOverlayConfig>;
   private runtime: RaycastNarrationOverlayRuntimeOptions;
   private readonly panel: Phaser.GameObjects.Rectangle;
-  private readonly panelGlow: Phaser.GameObjects.Rectangle;
-  private readonly scanline: Phaser.GameObjects.Rectangle;
-  private readonly staticBars: Phaser.GameObjects.Rectangle[];
   private readonly headerText: Phaser.GameObjects.Text;
   private readonly bodyText: Phaser.GameObjects.Text;
+  private readonly liveText: Phaser.GameObjects.Text;
   private readonly debugText: Phaser.GameObjects.Text;
   private queue: RaycastNarrationQueueState = createRaycastNarrationQueueState();
   private suppressed = false;
   private lastTransmissionAt = 0;
-  private fxFrame = 0;
+  private updateTick = 0;
+  private cachedBodyKey = '';
+  private cachedBodyDisplay = '';
+  private cachedHeader = 'RADIO // GM';
 
   constructor(
     scene: Phaser.Scene,
-    width: number,
-    height: number,
+    layout: RaycastNarrationLayout,
     hudCss: RaycastHudCssBundle,
     config: RaycastNarrationOverlayConfig = {},
     runtime: RaycastNarrationOverlayRuntimeOptions = {},
   ) {
     this.scene = scene;
+    this.layout = layout;
     this.runtime = runtime;
     this.config = {
       displayMs: config.displayMs ?? RAYCAST_NARRATION_DEFAULT_DISPLAY_MS,
@@ -60,107 +67,83 @@ export class RaycastNarrationOverlay {
       fadeOutMs: config.fadeOutMs ?? RAYCAST_NARRATION_FADE_OUT_MS,
       maxQueue: config.maxQueue ?? RAYCAST_NARRATION_MAX_QUEUE,
     };
-    this.layout = buildRaycastNarrationLayout(width, height);
     const depthBase = 16;
 
-    this.panelGlow = scene.add
+    this.panel = scene.add
       .rectangle(
-        this.layout.centerX,
-        this.layout.centerY,
-        this.layout.panelWidth + 8,
-        this.layout.panelHeight + 8,
-        this.palette.panelGlow,
-        0.35,
+        layout.originX,
+        layout.originY,
+        layout.panelWidth,
+        layout.panelHeight,
+        this.palette.panelFill,
+        0.42,
       )
+      .setOrigin(0, 0)
+      .setStrokeStyle(1, this.palette.panelStroke, 0.72)
       .setDepth(depthBase)
       .setVisible(false)
       .setAlpha(0);
 
-    this.panel = scene.add
-      .rectangle(
-        this.layout.centerX,
-        this.layout.centerY,
-        this.layout.panelWidth,
-        this.layout.panelHeight,
-        this.palette.panelFill,
-        0.94,
-      )
-      .setStrokeStyle(1, this.palette.panelStroke, 0.9)
+    this.headerText = scene.add
+      .text(layout.originX + 8, layout.originY + 5, this.cachedHeader, {
+        fontFamily: 'monospace',
+        fontSize: '9px',
+        fontStyle: '700',
+        color: this.palette.header,
+        letterSpacing: 1.1,
+      })
+      .setOrigin(0, 0)
       .setDepth(depthBase + 1)
       .setVisible(false)
       .setAlpha(0);
 
-    this.scanline = scene.add
-      .rectangle(
-        this.layout.centerX,
-        this.layout.centerY,
-        this.layout.panelWidth - 12,
-        2,
-        this.palette.scanline,
-        0.12,
-      )
+    this.liveText = scene.add
+      .text(layout.liveIndicatorX, layout.liveIndicatorY, '● LIVE', {
+        fontFamily: 'monospace',
+        fontSize: '8px',
+        fontStyle: '700',
+        color: hudCss.accentText || this.palette.accent,
+      })
+      .setOrigin(1, 0)
       .setDepth(depthBase + 2)
       .setVisible(false)
       .setAlpha(0);
 
-    this.staticBars = [];
-    const barWidth = 3;
-    const gap = (this.layout.panelWidth - 24) / 5;
-    for (let i = 0; i < 5; i += 1) {
-      const bar = scene.add
-        .rectangle(
-          this.layout.centerX - this.layout.panelWidth * 0.5 + 12 + i * gap,
-          this.layout.centerY - this.layout.panelHeight * 0.5 + 10,
-          barWidth,
-          6,
-          this.palette.static,
-          0.5,
-        )
-        .setDepth(depthBase + 2)
-        .setVisible(false)
-        .setAlpha(0);
-      this.staticBars.push(bar);
-    }
-
-    this.headerText = scene.add
-      .text(this.layout.centerX, this.layout.centerY - 40, '▌ RADIO // GAME MASTER', {
-        fontFamily: 'monospace',
-        fontSize: '10px',
-        fontStyle: '700',
-        color: this.palette.header,
-        letterSpacing: 1.4,
-      })
-      .setOrigin(0.5, 0)
-      .setDepth(depthBase + 3)
-      .setVisible(false)
-      .setAlpha(0);
-
     this.bodyText = scene.add
-      .text(this.layout.centerX, this.layout.centerY - 22, '', {
+      .text(layout.originX + 8, layout.originY + 20, '', {
         fontFamily: 'monospace',
-        fontSize: '12px',
+        fontSize: '11px',
         fontStyle: '700',
         color: hudCss.accentText || this.palette.accent,
         align: 'left',
-        lineSpacing: 5,
-        wordWrap: { width: this.layout.bodyWrapWidth },
+        lineSpacing: 3,
+        wordWrap: { width: layout.bodyWrapWidth },
       })
-      .setOrigin(0.5, 0)
-      .setDepth(depthBase + 3)
+      .setOrigin(0, 0)
+      .setDepth(depthBase + 1)
       .setVisible(false)
       .setAlpha(0);
 
     this.debugText = scene.add
-      .text(this.layout.centerX + this.layout.panelWidth * 0.5 - 8, this.layout.centerY - 44, 'GM·DBG', {
+      .text(layout.originX + layout.panelWidth - 4, layout.originY + 5, 'DBG', {
         fontFamily: 'monospace',
-        fontSize: '8px',
+        fontSize: '7px',
         fontStyle: '700',
         color: this.palette.accentDim,
       })
       .setOrigin(1, 0)
-      .setDepth(depthBase + 4)
+      .setDepth(depthBase + 2)
       .setVisible(false)
       .setAlpha(0);
+  }
+
+  setLayout(layout: RaycastNarrationLayout): void {
+    this.layout = layout;
+    this.panel.setPosition(layout.originX, layout.originY).setSize(layout.panelWidth, layout.panelHeight);
+    this.headerText.setPosition(layout.originX + 8, layout.originY + 5);
+    this.bodyText.setPosition(layout.originX + 8, layout.originY + 20).setWordWrapWidth(layout.bodyWrapWidth);
+    this.liveText.setPosition(layout.liveIndicatorX, layout.liveIndicatorY);
+    this.debugText.setPosition(layout.originX + layout.panelWidth - 4, layout.originY + 5);
   }
 
   applyConfig(config: RaycastNarrationOverlayConfig, runtime?: RaycastNarrationOverlayRuntimeOptions): void {
@@ -173,7 +156,7 @@ export class RaycastNarrationOverlay {
     if (runtime) this.runtime = { ...this.runtime, ...runtime };
   }
 
-  showNarration(message: string): void {
+  showNarration(message: string, tier: GameMasterNarrationTier = 'ambient'): void {
     const wasIdle = !this.queue.active && this.queue.pending.length === 0;
     this.queue = enqueueNarrationMessage(
       this.queue,
@@ -181,6 +164,7 @@ export class RaycastNarrationOverlay {
       this.config.maxQueue,
       this.scene.time.now,
       this.config.displayMs,
+      tier,
     );
     if (wasIdle && this.queue.active) {
       this.playTransmissionStart();
@@ -196,6 +180,9 @@ export class RaycastNarrationOverlay {
 
   update(nowMs: number): void {
     if (this.suppressed) return;
+
+    this.updateTick += 1;
+    const throttleVisual = this.updateTick % 2 !== 0;
 
     if (this.queue.active) {
       this.queue = {
@@ -218,44 +205,39 @@ export class RaycastNarrationOverlay {
       return;
     }
 
-    this.fxFrame += 1;
-    const refreshFx = this.fxFrame % 2 === 0;
-    const fx = refreshFx
-      ? buildRaycastNarrationFxState(active, nowMs, this.config.fadeInMs, alpha)
-      : buildRaycastNarrationFxState(active, nowMs - 1, this.config.fadeInMs, alpha);
+    if (throttleVisual && active.phase === 'hold') {
+      return;
+    }
 
-    const panelAlpha = alpha * 0.86 * fx.flickerMul;
-    const textAlpha = alpha * fx.flickerMul;
-    const body = fx.showCursor ? `${active.message}▌` : active.message;
+    const flickerMul = computeNarrationFlickerMul(nowMs, alpha);
+    const panelAlpha = alpha * 0.72 * flickerMul;
+    const textAlpha = alpha * flickerMul;
+    const pageText = active.pages[active.pageIndex] ?? active.message;
+    const displayPage = sanitizeRadioDisplayText(pageText);
+    const typed = computeRadioTypewriterText(displayPage, active.typewriterStartedAtMs, nowMs);
+    const showCursor =
+      active.phase === 'hold' && !isRadioTypewriterComplete(displayPage, active.typewriterStartedAtMs, nowMs);
+    const body = showCursor ? `${typed}▌` : typed;
+    const header = this.runtime.debug ? 'RADIO // GM · DBG' : 'RADIO // GM';
+    const liveSpeaking = isGameMasterVoiceSpeaking();
+    const liveAlpha = liveSpeaking ? textAlpha * (0.7 + Math.sin(nowMs * 0.012) * 0.25) : 0;
 
-    this.panelGlow.setVisible(true).setAlpha(panelAlpha * 0.55);
+    if (this.cachedHeader !== header) {
+      this.cachedHeader = header;
+      this.headerText.setText(header);
+    }
+    const bodyKey = `${active.pageIndex}:${body}`;
+    if (this.cachedBodyKey !== bodyKey) {
+      this.cachedBodyKey = bodyKey;
+      this.cachedBodyDisplay = body;
+      this.bodyText.setText(body);
+    }
+
     this.panel.setVisible(true).setAlpha(panelAlpha);
-    this.scanline
-      .setVisible(true)
-      .setAlpha(panelAlpha * 0.35)
-      .setY(this.layout.centerY - this.layout.panelHeight * 0.5 + 8 + (nowMs % 120) * 0.04);
-
-    fx.staticHeights.forEach((heightMul, index) => {
-      const bar = this.staticBars[index];
-      if (!bar) return;
-      bar
-        .setVisible(true)
-        .setAlpha(panelAlpha * 0.4)
-        .setSize(bar.width, 4 + heightMul * 10);
-    });
-
-    this.headerText
-      .setVisible(true)
-      .setAlpha(textAlpha * 0.95)
-      .setText(this.runtime.debug ? '▌ RADIO // GM [DEBUG]' : '▌ RADIO // GAME MASTER');
-
-    this.bodyText
-      .setText(body)
-      .setVisible(true)
-      .setAlpha(textAlpha)
-      .setX(this.layout.centerX + fx.glitchOffsetX);
-
-    this.debugText.setVisible(Boolean(this.runtime.debug)).setAlpha(textAlpha * 0.8);
+    this.headerText.setVisible(true).setAlpha(textAlpha * 0.95);
+    this.bodyText.setVisible(true).setAlpha(textAlpha);
+    this.liveText.setVisible(liveSpeaking).setAlpha(liveAlpha);
+    this.debugText.setVisible(Boolean(this.runtime.debug)).setAlpha(textAlpha * 0.75);
   }
 
   private playTransmissionStart(): void {
@@ -266,12 +248,11 @@ export class RaycastNarrationOverlay {
   }
 
   private hideVisuals(): void {
-    this.panelGlow.setVisible(false).setAlpha(0);
     this.panel.setVisible(false).setAlpha(0);
-    this.scanline.setVisible(false).setAlpha(0);
-    this.staticBars.forEach((bar) => bar.setVisible(false).setAlpha(0));
     this.headerText.setVisible(false).setAlpha(0);
     this.bodyText.setVisible(false).setAlpha(0);
+    this.liveText.setVisible(false).setAlpha(0);
     this.debugText.setVisible(false).setAlpha(0);
+    this.cachedBodyKey = '';
   }
 }
