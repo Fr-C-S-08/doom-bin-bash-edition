@@ -57,8 +57,7 @@ describe('raycast pause menu formatting', () => {
       invertY: 'NO',
       vibration: 'SÍ',
       screenshake: 'SÍ',
-      minimap: 'SÍ',
-      fovScale: '120% (130°)'
+      minimap: 'SÍ'
     });
 
     expect(body).toContain('CONFIGURACIÓN DE CONTROL');

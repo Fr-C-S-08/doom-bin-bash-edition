@@ -111,7 +111,7 @@ describe('raycast movement', () => {
     expect(collides(openedMap, crossed.x, crossed.y, RAYCAST_MOVEMENT.collisionRadius)).toBe(false);
   });
 
-  it('keeps classic base FOV at scale 1.0 for regression', () => {
+  it('uses a wider classic FPS FOV while staying readable', () => {
     const fovDegrees = (RAYCAST_RENDERER_CONFIG.fovRadians * 180) / Math.PI;
 
     expect(fovDegrees).toBeGreaterThanOrEqual(106);

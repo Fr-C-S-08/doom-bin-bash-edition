@@ -16,9 +16,6 @@ import {
   cycleAimAssistSetting,
   getAimAssistLevel,
   getCameraSmoothing,
-  getRaycastFovScale,
-  cycleRaycastFovScale,
-  formatRaycastFovScaleLabel,
   getGamepadInvertY,
   getGamepadLeftDeadzone,
   getGamepadRightDeadzone,
@@ -61,7 +58,6 @@ const ROW_KEYS = [
   'pad_sens',
   'aim_assist',
   'camera_smooth',
-  'fov',
   'pad_deadzone_left',
   'pad_deadzone_right',
   'invert_y',
@@ -342,9 +338,6 @@ export class SettingsScene extends Phaser.Scene {
       const next = Math.round((getCameraSmoothing(this.registry) + direction * 0.05) * 100) / 100;
       setCameraSmoothing(this.registry, next);
       this.audioPreview.play('uiConfirm', 0.62, this.time.now);
-    } else if (row === 'fov') {
-      cycleRaycastFovScale(this.registry, direction);
-      this.audioPreview.play('uiConfirm', 0.62, this.time.now);
     } else if (row === 'pad_deadzone_left') {
       const next = Math.round((getGamepadLeftDeadzone(this.registry) + direction * 0.01) * 100) / 100;
       setGamepadLeftDeadzone(this.registry, next);
@@ -425,7 +418,6 @@ export class SettingsScene extends Phaser.Scene {
     label('pad_sens', `MANDO · sensibilidad ×${padSens}`);
     label('aim_assist', `APUNTADO · asistencia ${aimAssist}`);
     label('camera_smooth', `CÁMARA · suavizado ${cameraSmooth}`);
-    label('fov', `CAMPO VISUAL · ${formatRaycastFovScaleLabel(getRaycastFovScale(this.registry))}`);
     label('pad_deadzone_left', `MANDO · deadzone izq ${padDeadzoneLeft}`);
     label('pad_deadzone_right', `MANDO · deadzone der ${padDeadzoneRight}`);
     label('invert_y', `MANDO · invertir eje Y ${invertY}`);

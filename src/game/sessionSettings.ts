@@ -1,12 +1,5 @@
 import type { AimAssistLevel } from './raycast/RaycastLookFeel';
 import { cycleAimAssistLevel } from './raycast/RaycastLookFeel';
-import {
-  RAYCAST_DEFAULT_FOV_SCALE,
-  RAYCAST_FOV_SCALE_MAX,
-  RAYCAST_FOV_SCALE_MIN,
-  RAYCAST_FOV_SCALE_STEPS,
-  raycastFovDegreesFromScale,
-} from './raycast/RaycastRendererConfig';
 
 /** Runtime preferences mirrored in Phaser registry; persisted via SaveManager when hooks are bound. */
 
@@ -26,7 +19,6 @@ export const SESSION_TOUCH_BUTTON_SCALE_KEY = 'session_touch_button_scale';
 export const SESSION_TOUCH_JOYSTICK_DEADZONE_KEY = 'session_touch_joystick_deadzone';
 export const SESSION_AIM_ASSIST_KEY = 'session_aim_assist';
 export const SESSION_CAMERA_SMOOTHING_KEY = 'session_camera_smoothing';
-export const SESSION_FOV_SCALE_KEY = 'session_fov_scale';
 
 export interface SessionRegistry {
   get(key: string): unknown;
@@ -48,7 +40,7 @@ const DEFAULT_TOUCH_LOOK_SENS = 1;
 const DEFAULT_TOUCH_BUTTON_SCALE = 1;
 const DEFAULT_TOUCH_JOYSTICK_DEADZONE = 0.18;
 const DEFAULT_AIM_ASSIST: AimAssistLevel = 'low';
-const DEFAULT_CAMERA_SMOOTHING = 0.22;
+const DEFAULT_CAMERA_SMOOTHING = 0.2;
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
@@ -71,34 +63,6 @@ export function ensureSessionSettings(registry: SessionRegistry): void {
   if (registry.get(SESSION_TOUCH_JOYSTICK_DEADZONE_KEY) === undefined) registry.set(SESSION_TOUCH_JOYSTICK_DEADZONE_KEY, DEFAULT_TOUCH_JOYSTICK_DEADZONE);
   if (registry.get(SESSION_AIM_ASSIST_KEY) === undefined) registry.set(SESSION_AIM_ASSIST_KEY, DEFAULT_AIM_ASSIST);
   if (registry.get(SESSION_CAMERA_SMOOTHING_KEY) === undefined) registry.set(SESSION_CAMERA_SMOOTHING_KEY, DEFAULT_CAMERA_SMOOTHING);
-  if (registry.get(SESSION_FOV_SCALE_KEY) === undefined) registry.set(SESSION_FOV_SCALE_KEY, RAYCAST_DEFAULT_FOV_SCALE);
-}
-
-export function getRaycastFovScale(registry: SessionRegistry): number {
-  const v = Number(registry.get(SESSION_FOV_SCALE_KEY));
-  if (!Number.isFinite(v)) return RAYCAST_DEFAULT_FOV_SCALE;
-  return clamp(v, RAYCAST_FOV_SCALE_MIN, RAYCAST_FOV_SCALE_MAX);
-}
-
-export function setRaycastFovScale(registry: SessionRegistry, scale: number): void {
-  registry.set(SESSION_FOV_SCALE_KEY, clamp(scale, RAYCAST_FOV_SCALE_MIN, RAYCAST_FOV_SCALE_MAX));
-  notifySessionSettingsPersist();
-}
-
-export function cycleRaycastFovScale(registry: SessionRegistry, direction: number): number {
-  const current = getRaycastFovScale(registry);
-  const steps = RAYCAST_FOV_SCALE_STEPS;
-  const idx = steps.findIndex((s) => Math.abs(s - current) < 0.001);
-  const base = idx >= 0 ? idx : steps.indexOf(RAYCAST_DEFAULT_FOV_SCALE);
-  const next = steps[(base + direction + steps.length) % steps.length];
-  setRaycastFovScale(registry, next);
-  return next;
-}
-
-export function formatRaycastFovScaleLabel(scale: number): string {
-  const pct = Math.round(scale * 100);
-  const deg = Math.round(raycastFovDegreesFromScale(scale));
-  return `${pct}% (${deg}°)`;
 }
 
 export function getMouseSensitivity(registry: SessionRegistry): number {

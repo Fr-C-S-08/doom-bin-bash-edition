@@ -226,7 +226,7 @@ import {
 import { buildRaycastRunSummary, computeRaycastRunMasteryRankParts } from '../raycast/RaycastRunSummary';
 import { RaycastPlayerController, type RaycastPlayerState } from '../raycast/RaycastPlayerController';
 import { RAYCAST_MOVEMENT } from '../raycast/RaycastMovement';
-import { RaycastRenderer, buildRaycastRendererConfig, type RaycastBillboard } from '../raycast/RaycastRenderer';
+import { RaycastRenderer, type RaycastBillboard } from '../raycast/RaycastRenderer';
 import { appendRaycastPlaytestTelemetry } from '../raycast/RaycastTelemetry';
 import {
   buildRaycastLowHealthWarningMessage,
@@ -270,9 +270,6 @@ import { prepareGameSession } from '../save/persistSessionSettings';
 import {
   getAimAssistLevel,
   getCameraSmoothing,
-  getRaycastFovScale,
-  cycleRaycastFovScale,
-  formatRaycastFovScaleLabel,
   getGamepadInvertY,
   getGamepadLeftDeadzone,
   getGamepadRightDeadzone,
@@ -848,12 +845,7 @@ export class RaycastScene extends Phaser.Scene {
       })
     });
     this.touchInput.create();
-    this.raycastRenderer = new RaycastRenderer(
-      this,
-      this.map,
-      this.currentLevel,
-      buildRaycastRendererConfig(getRaycastFovScale(this.registry)),
-    );
+    this.raycastRenderer = new RaycastRenderer(this, this.map, this.currentLevel);
     this.controller = new RaycastPlayerController(
       this,
       this.map,
@@ -1323,7 +1315,6 @@ export class RaycastScene extends Phaser.Scene {
     this.updatePickupToast();
     this.combat?.tick(this.time.now);
     const deltaMs = Math.min(Math.max(0, delta), 50);
-    this.raycastRenderer.setFovScale(getRaycastFovScale(this.registry));
     const deltaSeconds = deltaMs / 1000;
     const weapon = this.combat.getCurrentWeapon();
     const reloadBlend = this.combat.getReloadBlend(this.time.now);
@@ -2317,8 +2308,7 @@ export class RaycastScene extends Phaser.Scene {
             invertY: getGamepadInvertY(this.registry) ? 'SÍ' : 'NO',
             vibration: getGamepadVibrationEnabled(this.registry) ? 'SÍ' : 'NO',
             screenshake: getScreenshakeEnabled(this.registry) ? 'SÍ' : 'NO',
-            minimap: getMinimapDefaultVisible(this.registry) ? 'SÍ' : 'NO',
-            fovScale: formatRaycastFovScaleLabel(getRaycastFovScale(this.registry))
+            minimap: getMinimapDefaultVisible(this.registry) ? 'SÍ' : 'NO'
           },
           { columnChars: 31 }
         )
@@ -2398,9 +2388,6 @@ export class RaycastScene extends Phaser.Scene {
         break;
       case 'minimap':
         setMinimapDefaultVisible(this.registry, flip(getMinimapDefaultVisible(this.registry)));
-        break;
-      case 'fov':
-        cycleRaycastFovScale(this.registry, direction);
         break;
       case 'back':
         this.closeControlSettingsPanel();

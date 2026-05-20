@@ -29,16 +29,7 @@ import {
   type RaycastAtmosphereRenderOptions,
 } from "./RaycastAtmosphere";
 import { RAYCAST_LEVEL, type RaycastLevel } from "./RaycastLevel";
-import {
-  buildRaycastRendererConfig,
-  raycastFovRadiansFromScale,
-  type RaycastRendererConfig,
-} from "./RaycastRendererConfig";
-import {
-  raycastHalfTan,
-  raycastRayAngleFromCameraT,
-  raycastScreenXFromAngleDelta,
-} from "./RaycastProjection";
+import { RAYCAST_RENDERER_CONFIG, type RaycastRendererConfig } from "./RaycastRendererConfig";
 import { RAYCAST_PALETTE } from "./RaycastPalette";
 import {
   RAYCAST_CORPSE_FADE_MS,
@@ -70,18 +61,8 @@ import {
 } from "./RaycastVisualTheme";
 export {
   RAYCAST_RENDERER_CONFIG,
-  buildRaycastRendererConfig,
-  raycastFovDegreesFromScale,
-  raycastFovRadiansFromScale,
-  RAYCAST_BASE_FOV_DEGREES,
-  RAYCAST_DEFAULT_FOV_SCALE,
   type RaycastRendererConfig,
 } from "./RaycastRendererConfig";
-export {
-  raycastHalfTan,
-  raycastRayAngleFromCameraT,
-  raycastScreenXFromAngleDelta,
-} from "./RaycastProjection";
 
 const WALL_COLORS: Record<number, number> = RAYCAST_ATMOSPHERE.wallColors;
 
@@ -139,17 +120,12 @@ export class RaycastRenderer {
   private readonly billboardProjectionScratch: BillboardProjection[] = [];
   private readonly enemySpritePool: Phaser.GameObjects.Image[] = [];
   private activeEnemySpriteCount = 0;
-  private readonly config: RaycastRendererConfig;
-  private fovHalfTan: number;
-
   constructor(
     scene: Phaser.Scene,
     private readonly map: RaycastMap,
     private readonly level: RaycastLevel = RAYCAST_LEVEL,
-    config: RaycastRendererConfig = buildRaycastRendererConfig(),
+    private readonly config: RaycastRendererConfig = RAYCAST_RENDERER_CONFIG,
   ) {
-    this.config = { ...config };
-    this.fovHalfTan = raycastHalfTan(this.config.fovRadians);
     this.scene = scene;
     this.graphics = scene.add.graphics();
     this.weaponSprite = scene.add.image(
@@ -183,13 +159,6 @@ export class RaycastRenderer {
     }
   }
 
-  setFovScale(fovScale: number): void {
-    const nextFov = raycastFovRadiansFromScale(fovScale);
-    if (Math.abs(nextFov - this.config.fovRadians) < 1e-6) return;
-    this.config.fovRadians = nextFov;
-    this.fovHalfTan = raycastHalfTan(nextFov);
-  }
-
   render(
     player: RaycastPlayerState,
     width: number,
@@ -203,11 +172,11 @@ export class RaycastRenderer {
     this.drawBackground(player, width, height, atmosphere);
 
     const columnWidth = width / this.config.rayCount;
-    const halfTan = this.fovHalfTan;
+    const startAngle = player.angle - this.config.fovRadians * 0.5;
 
     for (let column = 0; column < this.config.rayCount; column += 1) {
       const cameraT = column / Math.max(1, this.config.rayCount - 1);
-      const rayAngle = raycastRayAngleFromCameraT(player.angle, cameraT, halfTan);
+      const rayAngle = startAngle + cameraT * this.config.fovRadians;
       const hit = castRay(this.map, player.x, player.y, rayAngle, player.angle);
       this.depthBuffer[column] = hit.correctedDistance;
       const wallHeight = Math.min(
@@ -612,7 +581,8 @@ export class RaycastRenderer {
     const angleDelta = normalizeAngle(angleToEnemy - player.angle);
     if (Math.abs(angleDelta) > this.config.fovRadians * 0.58) return;
 
-    const screenX = raycastScreenXFromAngleDelta(angleDelta, this.fovHalfTan, width);
+    const screenX =
+      width * 0.5 + (angleDelta / (this.config.fovRadians * 0.5)) * width * 0.5;
     const correctedDistance = Math.max(0.001, distance * Math.cos(angleDelta));
     const column = Phaser.Math.Clamp(
       Math.floor(screenX / (width / this.config.rayCount)),
@@ -3291,7 +3261,7 @@ private sampleWallTextureColor(
     if (Math.abs(angleDelta) > this.config.fovRadians * 0.58) return false;
 
     const screenX =
-      raycastScreenXFromAngleDelta(angleDelta, this.fovHalfTan, width);
+      width * 0.5 + (angleDelta / (this.config.fovRadians * 0.5)) * width * 0.5;
     const correctedDistance = Math.max(0.001, distance * Math.cos(angleDelta));
     const size = Phaser.Math.Clamp(height / correctedDistance / 1.7, 18, 210);
     out.enemy = enemy;
@@ -3317,7 +3287,7 @@ private sampleWallTextureColor(
     if (Math.abs(angleDelta) > this.config.fovRadians * 0.52) return false;
 
     const screenX =
-      raycastScreenXFromAngleDelta(angleDelta, this.fovHalfTan, width);
+      width * 0.5 + (angleDelta / (this.config.fovRadians * 0.5)) * width * 0.5;
     const correctedDistance = Math.max(0.001, distance * Math.cos(angleDelta));
     const size = Phaser.Math.Clamp(height / correctedDistance / 28, 3, 14);
     out.projectile = projectile;
@@ -3342,7 +3312,7 @@ private sampleWallTextureColor(
     if (Math.abs(angleDelta) > this.config.fovRadians * 0.52) return false;
 
     const screenX =
-      raycastScreenXFromAngleDelta(angleDelta, this.fovHalfTan, width);
+      width * 0.5 + (angleDelta / (this.config.fovRadians * 0.5)) * width * 0.5;
     const correctedDistance = Math.max(0.001, distance * Math.cos(angleDelta));
     const size = Phaser.Math.Clamp(
       (height / correctedDistance / 18) * billboard.radius,
