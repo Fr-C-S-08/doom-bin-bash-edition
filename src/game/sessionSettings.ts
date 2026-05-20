@@ -1,5 +1,13 @@
 import type { AimAssistLevel } from './raycast/RaycastLookFeel';
 import { cycleAimAssistLevel } from './raycast/RaycastLookFeel';
+import {
+  DEFAULT_FPS_TARGET,
+  DEFAULT_RENDER_QUALITY,
+  normalizeFpsTarget,
+  normalizeRenderQuality,
+  type FpsTarget,
+  type RenderQualityId,
+} from './raycast/RaycastPerformanceSettings';
 
 /** Runtime preferences mirrored in Phaser registry; persisted via SaveManager when hooks are bound. */
 
@@ -19,6 +27,12 @@ export const SESSION_TOUCH_BUTTON_SCALE_KEY = 'session_touch_button_scale';
 export const SESSION_TOUCH_JOYSTICK_DEADZONE_KEY = 'session_touch_joystick_deadzone';
 export const SESSION_AIM_ASSIST_KEY = 'session_aim_assist';
 export const SESSION_CAMERA_SMOOTHING_KEY = 'session_camera_smoothing';
+export const SESSION_GM_NARRATION_ENABLED_KEY = 'session_gm_narration_enabled';
+export const SESSION_GM_VOICE_ENABLED_KEY = 'session_gm_voice_enabled';
+export const SESSION_GM_NARRATION_DURATION_KEY = 'session_gm_narration_duration_ms';
+export const SESSION_GM_NARRATION_DEBUG_KEY = 'session_gm_narration_debug';
+export const SESSION_FPS_TARGET_KEY = 'session_fps_target';
+export const SESSION_RENDER_QUALITY_KEY = 'session_render_quality';
 
 export interface SessionRegistry {
   get(key: string): unknown;
@@ -41,6 +55,11 @@ const DEFAULT_TOUCH_BUTTON_SCALE = 1;
 const DEFAULT_TOUCH_JOYSTICK_DEADZONE = 0.18;
 const DEFAULT_AIM_ASSIST: AimAssistLevel = 'low';
 const DEFAULT_CAMERA_SMOOTHING = 0.2;
+const DEFAULT_GM_NARRATION_ENABLED = true;
+const DEFAULT_GM_VOICE_ENABLED = false;
+const DEFAULT_GM_NARRATION_DURATION_MS = 5_200;
+const GM_NARRATION_DURATION_MIN_MS = 4_000;
+const GM_NARRATION_DURATION_MAX_MS = 6_000;
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
@@ -63,6 +82,78 @@ export function ensureSessionSettings(registry: SessionRegistry): void {
   if (registry.get(SESSION_TOUCH_JOYSTICK_DEADZONE_KEY) === undefined) registry.set(SESSION_TOUCH_JOYSTICK_DEADZONE_KEY, DEFAULT_TOUCH_JOYSTICK_DEADZONE);
   if (registry.get(SESSION_AIM_ASSIST_KEY) === undefined) registry.set(SESSION_AIM_ASSIST_KEY, DEFAULT_AIM_ASSIST);
   if (registry.get(SESSION_CAMERA_SMOOTHING_KEY) === undefined) registry.set(SESSION_CAMERA_SMOOTHING_KEY, DEFAULT_CAMERA_SMOOTHING);
+  if (registry.get(SESSION_GM_NARRATION_ENABLED_KEY) === undefined) {
+    registry.set(SESSION_GM_NARRATION_ENABLED_KEY, DEFAULT_GM_NARRATION_ENABLED);
+  }
+  if (registry.get(SESSION_GM_NARRATION_DURATION_KEY) === undefined) {
+    registry.set(SESSION_GM_NARRATION_DURATION_KEY, DEFAULT_GM_NARRATION_DURATION_MS);
+  }
+  if (registry.get(SESSION_GM_VOICE_ENABLED_KEY) === undefined) {
+    registry.set(SESSION_GM_VOICE_ENABLED_KEY, DEFAULT_GM_VOICE_ENABLED);
+  }
+  if (registry.get(SESSION_GM_NARRATION_DEBUG_KEY) === undefined) registry.set(SESSION_GM_NARRATION_DEBUG_KEY, false);
+  if (registry.get(SESSION_FPS_TARGET_KEY) === undefined) registry.set(SESSION_FPS_TARGET_KEY, DEFAULT_FPS_TARGET);
+  if (registry.get(SESSION_RENDER_QUALITY_KEY) === undefined) {
+    registry.set(SESSION_RENDER_QUALITY_KEY, DEFAULT_RENDER_QUALITY);
+  }
+}
+
+export function getGameMasterNarrationEnabled(registry: SessionRegistry): boolean {
+  const v = registry.get(SESSION_GM_NARRATION_ENABLED_KEY);
+  if (v === false) return false;
+  return true;
+}
+
+export function setGameMasterNarrationEnabled(registry: SessionRegistry, enabled: boolean): void {
+  registry.set(SESSION_GM_NARRATION_ENABLED_KEY, enabled);
+  notifySessionSettingsPersist();
+}
+
+export function getGameMasterVoiceEnabled(registry: SessionRegistry): boolean {
+  return registry.get(SESSION_GM_VOICE_ENABLED_KEY) === true;
+}
+
+export function setGameMasterVoiceEnabled(registry: SessionRegistry, enabled: boolean): void {
+  registry.set(SESSION_GM_VOICE_ENABLED_KEY, Boolean(enabled));
+  notifySessionSettingsPersist();
+}
+
+export function getGameMasterNarrationDurationMs(registry: SessionRegistry): number {
+  const v = Number(registry.get(SESSION_GM_NARRATION_DURATION_KEY));
+  if (!Number.isFinite(v)) return DEFAULT_GM_NARRATION_DURATION_MS;
+  return clamp(v, GM_NARRATION_DURATION_MIN_MS, GM_NARRATION_DURATION_MAX_MS);
+}
+
+export function setGameMasterNarrationDurationMs(registry: SessionRegistry, ms: number): void {
+  registry.set(SESSION_GM_NARRATION_DURATION_KEY, clamp(ms, GM_NARRATION_DURATION_MIN_MS, GM_NARRATION_DURATION_MAX_MS));
+  notifySessionSettingsPersist();
+}
+
+export function getGameMasterNarrationDebug(registry: SessionRegistry): boolean {
+  return registry.get(SESSION_GM_NARRATION_DEBUG_KEY) === true;
+}
+
+export function setGameMasterNarrationDebug(registry: SessionRegistry, enabled: boolean): void {
+  registry.set(SESSION_GM_NARRATION_DEBUG_KEY, enabled);
+  notifySessionSettingsPersist();
+}
+
+export function getFpsTarget(registry: SessionRegistry): FpsTarget {
+  return normalizeFpsTarget(registry.get(SESSION_FPS_TARGET_KEY));
+}
+
+export function setFpsTarget(registry: SessionRegistry, target: FpsTarget): void {
+  registry.set(SESSION_FPS_TARGET_KEY, normalizeFpsTarget(target));
+  notifySessionSettingsPersist();
+}
+
+export function getRenderQuality(registry: SessionRegistry): RenderQualityId {
+  return normalizeRenderQuality(registry.get(SESSION_RENDER_QUALITY_KEY));
+}
+
+export function setRenderQuality(registry: SessionRegistry, quality: RenderQualityId): void {
+  registry.set(SESSION_RENDER_QUALITY_KEY, normalizeRenderQuality(quality));
+  notifySessionSettingsPersist();
 }
 
 export function getMouseSensitivity(registry: SessionRegistry): number {

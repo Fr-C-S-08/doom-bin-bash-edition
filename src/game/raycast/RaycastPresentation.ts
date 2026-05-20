@@ -321,7 +321,8 @@ export function getPrologueCopy(): PrologueCopy {
   return {
     missionBlock: 'MISIÓN:\nRecupera la señal perdida dentro del complejo abandonado.',
     objectiveBlock: 'OBJETIVO:\nSobrevive y alcanza la extracción.',
-    controlsBlock: 'CONTROLES:\nWASD mover\nMouse apuntar\n1/2/3 armas\nR recargar\nMando: A iniciar / B volver / Start pausa\nESC pausa',
+    controlsBlock:
+      'WASD · mover\nMouse · apuntar\n1/2/3 · armas\nR · recargar\nESC · pausa\nMando · A iniciar · B volver · Start pausa',
     continueLine: '[ ENTER / A / START PARA INICIAR ]',
     backLine: '[ ESC / B PARA VOLVER AL MENÚ ]'
   };

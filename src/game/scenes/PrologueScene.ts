@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { getRaycastDifficultyPreset, RAYCAST_DIFFICULTY_REGISTRY_KEY, type RaycastDifficultyId } from '../raycast/RaycastDifficulty';
 import { getPrologueCopy } from '../raycast/RaycastPresentation';
+import { buildPrologueModifierBlock, computePrologueScreenLayout } from '../raycast/RaycastPrologueLayout';
 import { RAYCAST_CSS, RAYCAST_PALETTE } from '../raycast/RaycastPalette';
 import {
   getRunModifierById,
@@ -66,7 +67,7 @@ export class PrologueScene extends Phaser.Scene {
       rewardTier: 0,
       runModifierId: this.runModifierId
     });
-  }
+  };
 
   private readonly handlePrologueBossOne = (): void => {
     this.jumpToBossFromPrologue(1);
@@ -88,7 +89,7 @@ export class PrologueScene extends Phaser.Scene {
       const idx = RUN_MODIFIER_ROULETTE.findIndex((m) => m.id === this.runModifierId);
       this.runModifierId = RUN_MODIFIER_ROULETTE[(idx + delta + RUN_MODIFIER_ROULETTE.length) % RUN_MODIFIER_ROULETTE.length].id;
     }
-    this.modifierText?.setText(this.buildModifierPrompt());
+    this.refreshModifierText();
   }
 
   constructor() {
@@ -134,83 +135,100 @@ export class PrologueScene extends Phaser.Scene {
     }
 
     const copy = getPrologueCopy();
-    const horizontalPadding = Math.max(18, Math.floor(width * 0.045));
-    const contentWidth = Math.min(width - horizontalPadding * 2, 760);
-    const titleY = Math.max(20, Math.floor(height * 0.08));
-    const missionY = titleY + 52;
-    const objectiveY = missionY + 96;
-    const controlsY = objectiveY + 92;
-    const modifierY = controlsY + 112;
-    const promptY = height - 52;
+    const layout = computePrologueScreenLayout(width, height);
+    const textStyle = {
+      fontFamily: 'monospace',
+      fontStyle: '700' as const,
+      align: 'center' as const,
+    };
 
     this.add
-      .text(width * 0.5, titleY, 'DOOM BIN BASH EDITION', {
-        fontFamily: 'monospace',
-        fontSize: width <= 720 ? '16px' : '20px',
-        fontStyle: '700',
+      .text(width * 0.5, layout.titleY, 'DOOM BIN BASH EDITION', {
+        ...textStyle,
+        fontSize: layout.fontTitle,
         color: ACCENT_COLOR,
-        align: 'center',
-        wordWrap: { width: contentWidth }
+        wordWrap: { width: layout.contentWidth }
       })
       .setOrigin(0.5, 0)
-      .setAlpha(0.85)
+      .setAlpha(0.88)
       .setDepth(4);
 
+    const missionOriginX = layout.twoColumn ? layout.missionColumnX : width * 0.5;
+    const missionAlign = layout.twoColumn ? 'right' : 'center';
+
     this.add
-      .text(width * 0.5, missionY, copy.missionBlock, {
+      .text(missionOriginX, layout.missionY, `// MISIÓN\n${copy.missionBlock.replace(/^MISIÓN:\n/, '')}`, {
         fontFamily: 'monospace',
-        fontSize: width <= 720 ? '13px' : '15px',
+        fontSize: layout.fontBody,
         fontStyle: '700',
         color: BODY_COLOR,
-        align: 'center',
+        align: missionAlign,
         lineSpacing: 8,
-        wordWrap: { width: Math.min(contentWidth, 720) }
+        wordWrap: { width: layout.columnWidth }
       })
-      .setOrigin(0.5, 0)
+      .setOrigin(layout.twoColumn ? 1 : 0.5, 0)
       .setDepth(4);
 
     this.add
-      .text(width * 0.5, objectiveY, copy.objectiveBlock, {
+      .text(missionOriginX, layout.objectiveY, `// OBJETIVO\n${copy.objectiveBlock.replace(/^OBJETIVO:\n/, '')}`, {
         fontFamily: 'monospace',
-        fontSize: width <= 720 ? '13px' : '15px',
+        fontSize: layout.fontBody,
         fontStyle: '700',
         color: ACCENT_COLOR,
-        align: 'center',
+        align: missionAlign,
         lineSpacing: 7,
-        wordWrap: { width: Math.min(contentWidth, 720) }
+        wordWrap: { width: layout.columnWidth }
       })
-      .setOrigin(0.5, 0)
+      .setOrigin(layout.twoColumn ? 1 : 0.5, 0)
       .setDepth(4);
 
+    const controlsOriginX = layout.twoColumn ? layout.controlsColumnX : width * 0.5;
+    const controlsAlign = layout.twoColumn ? 'left' : 'center';
+
     this.add
-      .text(width * 0.5, controlsY, copy.controlsBlock, {
+      .text(controlsOriginX, layout.controlsY, `// CONTROLES\n${copy.controlsBlock}`, {
         fontFamily: 'monospace',
-        fontSize: width <= 720 ? '12px' : '13px',
+        fontSize: layout.fontSmall,
         fontStyle: '700',
         color: MUTED_COLOR,
-        align: 'center',
-        lineSpacing: 6,
-        wordWrap: { width: Math.min(contentWidth, 720) }
+        align: controlsAlign,
+        lineSpacing: 5,
+        wordWrap: { width: layout.columnWidth }
       })
-      .setOrigin(0.5, 0)
-      .setDepth(4)
-      .setAlpha(0.92);
+      .setOrigin(layout.twoColumn ? 0 : 0.5, 0)
+      .setAlpha(0.94)
+      .setDepth(4);
 
-    this.promptText = this.add
-      .text(width * 0.5, promptY, `${copy.continueLine}\n${copy.backLine}`, {
+    this.modifierText = this.add
+      .text(width * 0.5, layout.modifierY, this.buildModifierPrompt(), {
         fontFamily: 'monospace',
-        fontSize: width <= 720 ? '10px' : '11px',
+        fontSize: layout.fontSmall,
+        backgroundColor: '#05120ccc',
         color: ACCENT_COLOR,
         align: 'center',
-        lineSpacing: 3,
-        wordWrap: { width: contentWidth }
+        lineSpacing: 5,
+        padding: { x: 14, y: 12 },
+        wordWrap: { width: Math.min(layout.contentWidth, 720), useAdvancedWrap: true }
+      })
+      .setOrigin(0.5, 0)
+      .setDepth(5)
+      .setAlpha(0.96);
+
+    this.promptText = this.add
+      .text(width * 0.5, layout.promptY, `${copy.continueLine}\n${copy.backLine}`, {
+        fontFamily: 'monospace',
+        fontSize: layout.fontSmall,
+        color: ACCENT_COLOR,
+        align: 'center',
+        lineSpacing: 4,
+        wordWrap: { width: layout.contentWidth }
       })
       .setOrigin(0.5, 1)
-      .setAlpha(0.8)
+      .setAlpha(0.82)
       .setDepth(5);
 
     this.gamepadStatusText = this.add
-      .text(width * 0.5, promptY - 30, '', {
+      .text(width * 0.5, layout.gamepadY, '', {
         fontFamily: 'monospace',
         fontSize: '10px',
         color: '#9ef0cf',
@@ -221,7 +239,7 @@ export class PrologueScene extends Phaser.Scene {
       .setDepth(5);
 
     this.add
-      .text(width * 0.5, height - 18, '// FRAGMENTO DE SEÑAL  ·  A Doom Bin Bash Project', {
+      .text(width * 0.5, height - 14, '// FRAGMENTO DE SEÑAL  ·  A Doom Bin Bash Project', {
         fontFamily: 'monospace',
         fontSize: '10px',
         color: ACCENT_COLOR,
@@ -230,21 +248,6 @@ export class PrologueScene extends Phaser.Scene {
       .setOrigin(0.5, 1)
       .setAlpha(0.55)
       .setDepth(4);
-
-    this.modifierText = this.add
-      .text(width * 0.5, modifierY, this.buildModifierPrompt(), {
-        fontFamily: 'monospace',
-        fontSize: width <= 720 ? '11px' : '12px',
-        backgroundColor: '#05120ccc',
-        color: ACCENT_COLOR,
-        align: 'center',
-        lineSpacing: 5,
-        padding: { x: 12, y: 10 },
-        wordWrap: { width: Math.min(contentWidth - 12, 720), useAdvancedWrap: true }
-      })
-      .setOrigin(0.5, 0)
-      .setDepth(5)
-      .setAlpha(0.94);
 
     this.cameras.main.fadeIn(520, 0, 0, 0);
 
@@ -346,19 +349,21 @@ export class PrologueScene extends Phaser.Scene {
 
   private readonly handleRollModifier = (): void => {
     this.runModifierId = rollRunModifier().id;
-    this.modifierText?.setText(this.buildModifierPrompt());
+    this.refreshModifierText();
   };
 
   private readonly handleClearModifier = (): void => {
     this.runModifierId = null;
-    this.modifierText?.setText(this.buildModifierPrompt());
+    this.refreshModifierText();
   };
 
+  private refreshModifierText(): void {
+    this.modifierText?.setText(this.buildModifierPrompt());
+  }
+
   private buildModifierPrompt(): string {
-    const selected = getRunModifierById(this.runModifierId);
-    if (!selected) {
-      return 'RULETA DE MODIFICADORES (OPCIONAL)\nACTIVO // NINGUNO\nM CAMBIAR  |  R ALEATORIO  |  N LIMPIAR';
-    }
-    return `RULETA DE MODIFICADORES (OPCIONAL)\nACTIVO // ${selected.label}\n${selected.summary}\n${selected.details}\nM CAMBIAR  |  R ALEATORIO  |  N LIMPIAR`;
+    return buildPrologueModifierBlock(this.runModifierId, (id) =>
+      id ? getRunModifierById(id as RunModifierId) : null,
+    );
   }
 }

@@ -21,8 +21,8 @@ describe('raycast presentation helpers', () => {
 
     expect(copy.missionBlock).toContain('MISIÓN');
     expect(copy.objectiveBlock).toContain('OBJETIVO');
-    expect(copy.controlsBlock).toContain('WASD mover');
-    expect(copy.controlsBlock).toContain('Mando: A iniciar');
+    expect(copy.controlsBlock).toContain('WASD · mover');
+    expect(copy.controlsBlock).toContain('Mando · A iniciar');
     expect(copy.continueLine).toContain('ENTER');
     expect(copy.continueLine).toContain('A');
     expect(copy.backLine).toContain('ESC');

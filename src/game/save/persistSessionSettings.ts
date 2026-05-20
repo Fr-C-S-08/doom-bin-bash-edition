@@ -15,7 +15,15 @@ import {
   getTouchLookSensitivity,
   getAimAssistLevel,
   getCameraSmoothing,
+  getGameMasterNarrationEnabled,
+  getGameMasterVoiceEnabled,
   registerSessionSettingsPersistHook,
+  SESSION_GM_NARRATION_ENABLED_KEY,
+  SESSION_GM_VOICE_ENABLED_KEY,
+  SESSION_FPS_TARGET_KEY,
+  SESSION_RENDER_QUALITY_KEY,
+  getFpsTarget,
+  getRenderQuality,
   SESSION_GAMEPAD_DEADZONE_KEY,
   SESSION_GAMEPAD_INVERT_Y_KEY,
   SESSION_GAMEPAD_LEFT_DEADZONE_KEY,
@@ -54,7 +62,11 @@ function readSettingsFromRegistry(registry: SessionRegistry): PersistedSettings 
     touchJoystickDeadzone: getTouchJoystickDeadzone(registry),
     preferFullscreen: getSaveManager().getSettings().preferFullscreen,
     aimAssist: getAimAssistLevel(registry),
-    cameraSmoothing: getCameraSmoothing(registry)
+    cameraSmoothing: getCameraSmoothing(registry),
+    gameMasterNarration: getGameMasterNarrationEnabled(registry),
+    gameMasterVoice: getGameMasterVoiceEnabled(registry),
+    fpsTarget: getFpsTarget(registry),
+    renderQuality: getRenderQuality(registry)
   };
 }
 
@@ -75,6 +87,10 @@ function applySettingsToRegistry(registry: SessionRegistry, settings: PersistedS
   registry.set(SESSION_TOUCH_JOYSTICK_DEADZONE_KEY, settings.touchJoystickDeadzone);
   registry.set(SESSION_AIM_ASSIST_KEY, settings.aimAssist);
   registry.set(SESSION_CAMERA_SMOOTHING_KEY, settings.cameraSmoothing);
+  registry.set(SESSION_GM_NARRATION_ENABLED_KEY, settings.gameMasterNarration);
+  registry.set(SESSION_GM_VOICE_ENABLED_KEY, settings.gameMasterVoice);
+  registry.set(SESSION_FPS_TARGET_KEY, settings.fpsTarget);
+  registry.set(SESSION_RENDER_QUALITY_KEY, settings.renderQuality);
 }
 
 export function hydrateSessionSettings(registry: SessionRegistry): void {

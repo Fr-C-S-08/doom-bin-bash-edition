@@ -155,6 +155,7 @@ export interface RaycastDebugHudState {
   position: string;
   directorLine: string;
   message: string;
+  gameMasterLine?: string;
 }
 
 export interface RaycastHudSummaryState {
@@ -265,7 +266,9 @@ export function buildRaycastHudLayout(width: number, height: number): RaycastHud
 }
 
 export function buildRaycastDebugLine(state: RaycastDebugHudState): string {
-  return [`POS ${state.position}`, state.directorLine, `MSG ${state.message}`].join(' | ');
+  const parts = [`POS ${state.position}`, state.directorLine, `MSG ${state.message}`];
+  if (state.gameMasterLine) parts.push(state.gameMasterLine);
+  return parts.join(' | ');
 }
 
 export function buildRaycastHudSummary(state: RaycastHudSummaryState): string[] {

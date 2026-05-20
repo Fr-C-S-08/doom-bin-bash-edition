@@ -4,6 +4,21 @@ export interface RaycastFrameStatsSample {
   enemies: number;
   projectiles: number;
   gmInFlight: boolean;
+  gmNarrationEnabled?: boolean;
+  gmVoiceEnabled?: boolean;
+  fpsTarget?: number;
+  renderQualityLabel?: string;
+  /** Shown only in perf HUD (e.g. P), not in main narration UI. */
+  gmSource?: 'ollama' | 'fallback' | null;
+  /** Compact GM status for perf/debug HUD. */
+  gmStatusLine?: string;
+}
+
+export interface RaycastDebugHudExtras {
+  fpsCurrent: number;
+  fpsTarget: number;
+  renderQualityLabel: string;
+  gmStatusLine: string;
 }
 
 export interface RaycastFrameStatsState {
@@ -51,15 +66,29 @@ export function formatRaycastPerfHudLine(
   sample: RaycastFrameStatsSample,
 ): string {
   const fps = state.fps > 0 ? state.fps.toFixed(0) : '—';
+  const target =
+    sample.fpsTarget === undefined
+      ? '—'
+      : sample.fpsTarget === 0
+        ? '∞'
+        : String(sample.fpsTarget);
   const frameNow = sample.frameMs.toFixed(1);
   const frameAvg = state.avgFrameMs.toFixed(1);
   const frameMax = state.maxFrameMs.toFixed(1);
   const renderNow = sample.renderMs.toFixed(1);
   const renderAvg = state.avgRenderMs.toFixed(1);
-  const gm = sample.gmInFlight ? 'GM pending' : 'GM idle';
+  const gmLine = sample.gmStatusLine ?? (sample.gmInFlight ? 'GM pending' : 'GM idle');
+  const quality = sample.renderQualityLabel ?? '—';
+  const source =
+    sample.gmSource === 'ollama' || sample.gmSource === 'fallback' ? ` src ${sample.gmSource}` : '';
   return [
-    `PERF  FPS ${fps}  frame ${frameNow}ms (avg ${frameAvg} max ${frameMax})`,
-    `render ${renderNow}ms (avg ${renderAvg} max ${state.maxRenderMs.toFixed(1)})`,
-    `ents ${sample.enemies}  proj ${sample.projectiles}  ${gm}`,
+    `PERF  FPS ${fps} / ${target}  Q ${quality}`,
+    `frame ${frameNow}ms (avg ${frameAvg} max ${frameMax})  render ${renderNow}ms (avg ${renderAvg})`,
+    `ents ${sample.enemies}  proj ${sample.projectiles}  ${gmLine}${source}`,
   ].join('\n');
+}
+
+export function formatRaycastDebugHudExtras(extras: RaycastDebugHudExtras): string {
+  const target = extras.fpsTarget === 0 ? '∞' : String(extras.fpsTarget);
+  return `FPS ${extras.fpsCurrent.toFixed(0)} / ${target} · Q ${extras.renderQualityLabel} · ${extras.gmStatusLine}`;
 }

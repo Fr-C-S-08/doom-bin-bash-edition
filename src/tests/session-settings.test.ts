@@ -43,6 +43,14 @@ import {
   setTouchControlsEnabled,
   setTouchJoystickDeadzone,
   setTouchLookSensitivity,
+  getGameMasterNarrationEnabled,
+  getGameMasterVoiceEnabled,
+  getFpsTarget,
+  getRenderQuality,
+  setGameMasterNarrationEnabled,
+  setGameMasterVoiceEnabled,
+  setFpsTarget,
+  setRenderQuality,
   type SessionRegistry
 } from '../game/sessionSettings';
 
@@ -74,6 +82,18 @@ describe('session registry settings', () => {
     expect(getTouchLookSensitivity(r)).toBe(1);
     expect(getTouchButtonScale(r)).toBe(1);
     expect(getTouchJoystickDeadzone(r)).toBeCloseTo(0.18);
+    expect(getGameMasterNarrationEnabled(r)).toBe(true);
+    expect(getGameMasterVoiceEnabled(r)).toBe(false);
+
+    setGameMasterNarrationEnabled(r, false);
+    expect(getGameMasterNarrationEnabled(r)).toBe(false);
+    setGameMasterVoiceEnabled(r, true);
+    expect(getGameMasterVoiceEnabled(r)).toBe(true);
+
+    setFpsTarget(r, 120);
+    expect(getFpsTarget(r)).toBe(120);
+    setRenderQuality(r, 'performance');
+    expect(getRenderQuality(r)).toBe('performance');
 
     setMouseSensitivity(r, 9);
     expect(getMouseSensitivity(r)).toBe(2.25);

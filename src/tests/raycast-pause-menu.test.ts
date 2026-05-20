@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   formatRaycastControlPauseBody,
   formatRaycastPauseMenuMxBody,
+  formatRaycastSettingsPauseBody,
   RAYCAST_PAUSE_MENU_LABELS,
+  RAYCAST_SETTINGS_PAUSE_ROWS,
   truncatePauseField
 } from '../game/raycast/RaycastPauseMenu';
 
@@ -24,20 +26,22 @@ describe('raycast pause menu formatting', () => {
       modifiersLine: 'Ritmo estándar'
     });
 
-    expect(body).toContain('VOLUMEN MAESTRO 80%');
+    expect(body).toContain('VOLUMEN 80%');
     expect(body).toContain('// PARTIDA');
     expect(body).toContain('// OBJETIVO');
     expect(body).toContain('│');
     expect(body).toContain('CONTROLES');
     expect(body).toContain('Entrada activa: teclado/mouse');
     expect(body).toContain('WASD · mover');
-    expect(body).toContain('Configuración de control');
+    expect(body).toContain('Ajustes (GM / FPS)');
+    expect(body).toContain('Controles de entrada');
     expect(body).toContain('// MENÚ');
     expect(body).toMatch(/Mundo ·/);
     expect(body).not.toContain('PROGRESO');
     expect(body).toContain(`> ${RAYCAST_PAUSE_MENU_LABELS[2]}`);
     expect(body).toContain(`  ${RAYCAST_PAUSE_MENU_LABELS[0]}`);
-    expect(RAYCAST_PAUSE_MENU_LABELS.length).toBe(8);
+    expect(RAYCAST_PAUSE_MENU_LABELS.length).toBe(9);
+    expect(body).toContain('// MENÚ');
   });
 
   it('truncates long pause fields safely', () => {
@@ -57,17 +61,38 @@ describe('raycast pause menu formatting', () => {
       invertY: 'NO',
       vibration: 'SÍ',
       screenshake: 'SÍ',
-      minimap: 'SÍ'
+      minimap: 'SÍ',
     });
 
-    expect(body).toContain('CONFIGURACIÓN DE CONTROL');
+    expect(body).toContain('CONTROLES DE ENTRADA');
     expect(body).toContain('Entrada activa: control');
-    expect(body).toContain('Stick izq · mover');
-    expect(body).toContain('CONTROL · DETECTADO');
-    expect(body).toContain('RATÓN · sensibilidad x1.00');
-    expect(body).toContain('MANDO · deadzone izq 0.18');
-    expect(body).toContain('MANDO · invertir eje Y NO');
-    expect(body).toContain('VOLVER AL MENÚ');
-    expect(body).toContain('A confirmar');
+    expect(body).toContain('CONTROLES');
+    expect(body).toContain('Ratón sens');
+    expect(body).toContain('Deadzone izq');
+    expect(body).toContain('Invertir Y');
+    expect(body).toContain('Ratón sens');
+    expect(body).toContain('Volver');
+  });
+
+  it('renders settings panel with Game Master and Performance sections', () => {
+    const body = formatRaycastSettingsPauseBody({
+      activeInput: 'keyboard_mouse',
+      selectionIndex: 0,
+      gmNarration: 'SÍ',
+      gmVoice: 'NO',
+      gmStatus: 'idle',
+      gmTestHint: 'ENTER prueba · G en juego',
+      fpsTarget: '60 (objetivo)',
+      renderQuality: 'Balanceado',
+    });
+
+    expect(body).toContain('// GAME MASTER');
+    expect(body).toContain('Narración');
+    expect(body).toContain('Voz');
+    expect(body).toContain('Estado GM · idle');
+    expect(body).toContain('// PERFORMANCE');
+    expect(body).toContain('FPS objetivo');
+    expect(RAYCAST_SETTINGS_PAUSE_ROWS).toContain('gm_voice');
+    expect(RAYCAST_SETTINGS_PAUSE_ROWS).toContain('fps_target');
   });
 });

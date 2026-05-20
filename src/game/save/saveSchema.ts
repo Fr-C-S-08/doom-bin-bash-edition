@@ -29,6 +29,10 @@ export interface PersistedSettings {
   preferFullscreen: boolean;
   aimAssist: AimAssistLevel;
   cameraSmoothing: number;
+  gameMasterNarration: boolean;
+  gameMasterVoice: boolean;
+  fpsTarget: number;
+  renderQuality: string;
 }
 
 export interface RaycastStatistics {
@@ -110,7 +114,11 @@ export function createDefaultSettings(): PersistedSettings {
     touchJoystickDeadzone: 0.18,
     preferFullscreen: false,
     aimAssist: 'low',
-    cameraSmoothing: 0.2
+    cameraSmoothing: 0.2,
+    gameMasterNarration: true,
+    gameMasterVoice: false,
+    fpsTarget: 60,
+    renderQuality: 'balanced'
   };
 }
 
@@ -220,7 +228,16 @@ function sanitizeSettings(value: unknown): PersistedSettings {
       value.aimAssist === 'off' || value.aimAssist === 'low' || value.aimAssist === 'normal'
         ? value.aimAssist
         : defaults.aimAssist,
-    cameraSmoothing: Math.min(0.85, Math.max(0, readNumber(value.cameraSmoothing, defaults.cameraSmoothing)))
+    cameraSmoothing: Math.min(0.85, Math.max(0, readNumber(value.cameraSmoothing, defaults.cameraSmoothing))),
+    gameMasterNarration: value.gameMasterNarration === false ? false : defaults.gameMasterNarration,
+    gameMasterVoice: readBoolean(value.gameMasterVoice, defaults.gameMasterVoice),
+    fpsTarget: [0, 60, 90, 120].includes(Number(value.fpsTarget))
+      ? Number(value.fpsTarget)
+      : defaults.fpsTarget,
+    renderQuality:
+      value.renderQuality === 'performance' || value.renderQuality === 'quality'
+        ? value.renderQuality
+        : defaults.renderQuality
   };
 }
 
