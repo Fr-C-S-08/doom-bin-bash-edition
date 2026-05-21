@@ -4,6 +4,7 @@ import { RAYCAST_RENDERER_CONFIG } from '../game/raycast/RaycastRendererConfig';
 import { cloneRaycastMap, openRaycastDoor, RAYCAST_LEVEL } from '../game/raycast/RaycastLevel';
 import {
   applyRaycastMouseTurn,
+  clampRaycastLookDelta,
   collides,
   getCameraRelativeInput,
   moveWithWallSlide,
@@ -125,5 +126,13 @@ describe('raycast movement', () => {
     const angle = applyRaycastMouseTurn(1, 12, { mouseTurnSensitivity: 0.01 });
 
     expect(angle).toBeCloseTo(1.12);
+  });
+
+  it('clamps mouse turn spikes before they can spin the camera wildly', () => {
+    expect(clampRaycastLookDelta(99)).toBeLessThan(Math.PI * 0.35 + 0.0001);
+    expect(clampRaycastLookDelta(-99)).toBeGreaterThan(-(Math.PI * 0.35) - 0.0001);
+
+    const angle = applyRaycastMouseTurn(0, 50000, { mouseTurnSensitivity: 0.01 }, Math.PI * 0.25);
+    expect(angle).toBeLessThanOrEqual(Math.PI * 0.25);
   });
 });

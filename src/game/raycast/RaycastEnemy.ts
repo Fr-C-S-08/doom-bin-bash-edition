@@ -5,6 +5,12 @@ import { RAYCAST_LEVEL, type RaycastEnemySpawn, type RaycastLevel } from './Rayc
 import { buildRaycastPatrolWaypoints, hashStringToSeed, type PatrolWaypoint } from './RaycastPatrol';
 const GLOBAL_ENEMY_HEALTH_MUL = 1.15;
 
+export interface RaycastPlayerTarget {
+  x: number;
+  y: number;
+  alive: boolean;
+}
+
 export interface RaycastEnemy {
   id: string;
   kind: EnemyKind;
@@ -23,6 +29,8 @@ export interface RaycastEnemy {
   /** Brief combat disruption after impact — keeps encounters readable without new AI states. */
   staggerUntil: number;
   hitFlashUntil: number;
+  /** Visual-only lateral kick from impacts (radians). */
+  flinchOffsetRad: number;
   deathBurstUntil: number;
   patrolWaypoints: PatrolWaypoint[];
   patrolWaypointIndex: number;
@@ -30,6 +38,13 @@ export interface RaycastEnemy {
   alertUntilTime: number;
   lastKnownPlayerX: number;
   lastKnownPlayerY: number;
+  /** Last game time (ms) the enemy had LOS/hearing on the player. */
+  lastSeenPlayerAt: number;
+  /** Lateral strafe sign (−1 | 1), flipped on a timer. */
+  strafeSign: number;
+  strafeFlipAt: number;
+  /** Combat-move stuck accumulator (ms) for micro reroute. */
+  tacticalStuckMs: number;
   /** Tracks prior tick combat (CHASE / ATTACK / RETREAT) for alert transition. */
   wasCombatActiveLastTick: boolean;
   /** Idle wander heading (radians). */
@@ -41,6 +56,8 @@ export interface RaycastEnemy {
   speedMultiplier?: number;
   projectileSpeedMultiplier?: number;
   variant?: RaycastEnemyVariant;
+  /** Rare elite call-sign shown in HUD when variant is ELITE. */
+  eliteDisplayName?: string;
   variantAccentColor?: number;
   frontalDamageReduction?: number;
   shieldPulseUntil?: number;
@@ -75,12 +92,17 @@ export function createRaycastEnemy(spawn: RaycastEnemySpawn): RaycastEnemy {
     attackWindupUntil: 0,
     staggerUntil: 0,
     hitFlashUntil: 0,
+    flinchOffsetRad: 0,
     deathBurstUntil: 0,
     patrolWaypoints: buildRaycastPatrolWaypoints(homeX, homeY, spawn.id),
     patrolWaypointIndex: 0,
     alertUntilTime: 0,
     lastKnownPlayerX: homeX,
     lastKnownPlayerY: homeY,
+    lastSeenPlayerAt: 0,
+    strafeSign: hashStringToSeed(spawn.id) % 2 === 0 ? -1 : 1,
+    strafeFlipAt: 0,
+    tacticalStuckMs: 0,
     wasCombatActiveLastTick: false,
     roamHeadingRad: (hashStringToSeed(spawn.id) % 360) * (Math.PI / 180),
     roamNextRedirectAt: 0,

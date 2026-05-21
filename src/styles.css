@@ -5,24 +5,114 @@ body {
   height: 100%;
   background: radial-gradient(circle at top, #1f2431 0%, #0b0d12 65%);
   overflow: hidden;
+  touch-action: none;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
 }
 
 body {
   display: flex;
   align-items: center;
   justify-content: center;
+  padding:
+    env(safe-area-inset-top)
+    env(safe-area-inset-right)
+    env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+  box-sizing: border-box;
 }
 
 #app {
   width: 100vw;
   height: 100vh;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
+  touch-action: none;
+  overscroll-behavior: none;
+  overflow: hidden;
 }
 
 #app canvas {
   display: block;
+  position: relative;
+  z-index: 1;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
   border-radius: 10px;
+  touch-action: none;
+  overscroll-behavior: none;
+}
+
+@media (display-mode: standalone) {
+  #app canvas {
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
+#pwa-install-banner {
+  position: fixed;
+  left: max(12px, env(safe-area-inset-left));
+  right: max(12px, env(safe-area-inset-right));
+  bottom: max(12px, env(safe-area-inset-bottom));
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(8, 12, 18, 0.94);
+  border: 1px solid rgba(107, 242, 213, 0.35);
+  color: #edf7f3;
+  font-family: monospace;
+  font-size: 12px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  transition: opacity 0.28s ease, transform 0.28s ease;
+}
+
+#pwa-install-banner.pwa-install-banner--hidden {
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+}
+
+.pwa-install-banner__text {
+  margin: 0;
+  flex: 1;
+  line-height: 1.35;
+}
+
+.pwa-install-banner__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pwa-install-banner__install,
+.pwa-install-banner__dismiss {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.pwa-install-banner__install {
+  border: 1px solid #6bf2d5;
+  background: #12313a;
+  color: #fff;
+  padding: 6px 10px;
+}
+
+.pwa-install-banner__dismiss {
+  border: 1px solid transparent;
+  background: transparent;
+  color: #9ab6c4;
+  padding: 4px 8px;
+  font-size: 16px;
+  line-height: 1;
 }

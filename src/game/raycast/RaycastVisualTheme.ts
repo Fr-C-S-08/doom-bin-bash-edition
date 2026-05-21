@@ -1,5 +1,6 @@
 import type { RectArea } from '../level/arenaLayout';
 import type { EnemyKind } from '../types/game';
+import { getRaycastEnemyIdentity } from './RaycastEnemyIdentity';
 import { RAYCAST_PALETTE } from './RaycastPalette';
 
 export type RaycastZoneThemeId =
@@ -637,55 +638,59 @@ export function getRaycastGroundVisualStyle(surface: Pick<RaycastSurfaceContext,
 }
 
 export function getRaycastEnemyVisualStyle(kind: EnemyKind, color: number): RaycastEnemyVisualStyle {
+  const identity = getRaycastEnemyIdentity(kind);
+  const accent = blendThemeColor(color, identity.identityColor, 0.44);
+  const windup = identity.windupColor;
+
   if (kind === 'BRUTE') {
     return {
       silhouette: 'juggernaut',
-      outlineColor: 0x120502,
-      accentColor: blendThemeColor(color, RAYCAST_PALETTE.amberSoft, 0.38),
-      eyeColor: RAYCAST_PALETTE.amberWarn,
-      coreColor: RAYCAST_PALETTE.rustBright,
+      outlineColor: 0x041204,
+      accentColor: accent,
+      eyeColor: 0xd8ffd8,
+      coreColor: identity.identityColor,
       hornStyle: 'ram',
       role: 'heavy',
-      windupColor: RAYCAST_PALETTE.patternRust
+      windupColor: windup
     };
   }
 
   if (kind === 'STALKER') {
     return {
       silhouette: 'phantom',
-      outlineColor: 0x010806,
-      accentColor: blendThemeColor(color, RAYCAST_PALETTE.toxicGlow, 0.38),
-      eyeColor: RAYCAST_PALETTE.boneBright,
-      coreColor: RAYCAST_PALETTE.toxicMid,
+      outlineColor: 0x12051a,
+      accentColor: accent,
+      eyeColor: 0xf0dcff,
+      coreColor: identity.identityColor,
       hornStyle: 'glitch-spikes',
       role: 'flanker',
-      windupColor: RAYCAST_PALETTE.patternOxide
+      windupColor: windup
     };
   }
 
   if (kind === 'SCRAMBLER') {
     return {
-      silhouette: 'raider',
-      outlineColor: 0x050208,
-      accentColor: blendThemeColor(color, RAYCAST_PALETTE.amberWarn, 0.42),
-      eyeColor: RAYCAST_PALETTE.boneBright,
-      coreColor: RAYCAST_PALETTE.rustBright,
-      hornStyle: 'glitch-spikes',
-      role: 'flanker',
-      windupColor: RAYCAST_PALETTE.amberWarn
+      silhouette: 'sentinel',
+      outlineColor: 0x141004,
+      accentColor: accent,
+      eyeColor: 0xfff6c8,
+      coreColor: identity.identityColor,
+      hornStyle: 'antenna',
+      role: 'artillery',
+      windupColor: windup
     };
   }
 
   if (kind === 'FLASHER') {
     return {
-      silhouette: 'sentinel',
+      silhouette: 'phantom',
       outlineColor: 0x12051a,
-      accentColor: blendThemeColor(color, 0xe7d4ff, 0.34),
+      accentColor: accent,
       eyeColor: 0xf2d9ff,
-      coreColor: 0xb86dff,
+      coreColor: identity.identityColor,
       hornStyle: 'antenna',
       role: 'flanker',
-      windupColor: 0xe3b6ff
+      windupColor: windup
     };
   }
 
@@ -693,24 +698,24 @@ export function getRaycastEnemyVisualStyle(kind: EnemyKind, color: number): Rayc
     return {
       silhouette: 'sentinel',
       outlineColor: 0x040810,
-      accentColor: blendThemeColor(color, RAYCAST_PALETTE.plasmaBright, 0.42),
+      accentColor: accent,
       eyeColor: RAYCAST_PALETTE.boneBright,
-      coreColor: RAYCAST_PALETTE.plasmaMid,
+      coreColor: identity.identityColor,
       hornStyle: 'antenna',
       role: 'artillery',
-      windupColor: RAYCAST_PALETTE.plasmaBright
+      windupColor: windup
     };
   }
 
   return {
     silhouette: 'raider',
     outlineColor: 0x100204,
-    accentColor: blendThemeColor(color, RAYCAST_PALETTE.telegraphRose, 0.22),
+    accentColor: accent,
     eyeColor: RAYCAST_PALETTE.boneBright,
-    coreColor: RAYCAST_PALETTE.bloodGate,
+    coreColor: identity.identityColor,
     hornStyle: 'tusk',
     role: 'pressure',
-    windupColor: RAYCAST_PALETTE.patternRust
+    windupColor: windup
   };
 }
 

@@ -100,6 +100,16 @@ describe('raycast HUD', () => {
     expect(debugHud).toContain('budget 4');
   });
 
+  it('buildRaycastDebugLine appends game master status when provided', () => {
+    const line = buildRaycastDebugLine({
+      position: '1,2',
+      directorLine: 'AI Calm',
+      message: 'OK',
+      gameMasterLine: 'GM idle | voice off',
+    });
+    expect(line).toContain('GM idle | voice off');
+  });
+
   it('compresses longer objective phrases into readable HUD tags', () => {
     expect(formatRaycastObjectiveLabel('find key')).toBe('KEY');
     expect(formatRaycastObjectiveLabel('OPEN DOOR')).toBe('DOOR');

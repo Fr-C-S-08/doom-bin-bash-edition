@@ -65,7 +65,7 @@ describe('enemy config', () => {
     expect(RAYCAST_ENEMY_CONFIG.STALKER).not.toBe(ARENA_ENEMY_CONFIG.STALKER);
     expect(RAYCAST_ENEMY_CONFIG.STALKER).toMatchObject({
       ...ARENA_ENEMY_CONFIG.STALKER,
-      color: 0x54e898,
+      color: 0x9f6aff,
       speed: 268,
       attackCooldownMs: 410,
       size: 26,

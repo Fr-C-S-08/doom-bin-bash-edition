@@ -64,13 +64,21 @@ export interface RaycastLevelStartObjectiveInput {
   livingEnemyCount?: number;
 }
 
+/** Neutral team credit — no individual author names in UI surfaces. */
+export const RAYCAST_TEAM_CREDIT_LINE = 'A Doom Bin Bash Project';
+
+export function getMainMenuInputHints(): string {
+  return 'A iniciar  ·  B volver  ·  Start iniciar';
+}
+
 /** Strings and vertical placement for the boot MenuScene. */
 export interface MainMenuCopy {
   title: string;
   subtitle: string;
   press3d: string;
   settingsPrompt: string;
-  footer: string;
+  footerCredit: string;
+  footerInputHints: string;
 }
 
 export interface MainMenuLayout {
@@ -82,7 +90,8 @@ export interface MainMenuLayout {
   settingsY: number;
   /** Center Y for the decorative frame behind the title */
   titleFrameCenterY: number;
-  footerY: number;
+  footerHintsY: number;
+  footerMaxWidth: number;
 }
 
 /** Death overlay — distinct voice from sector-clear screens (still terminal / horror). */
@@ -294,7 +303,8 @@ export function getMainMenuCopy(): MainMenuCopy {
     subtitle: 'RAYCAST // PROTOCOL STRIP',
     press3d: 'A / CLICK — INICIAR SECTOR 3D',
     settingsPrompt: 'S — CONFIG (SESIÓN)',
-    footer: 'Made by Hotzh3'
+    footerCredit: RAYCAST_TEAM_CREDIT_LINE,
+    footerInputHints: getMainMenuInputHints()
   };
 }
 
@@ -311,9 +321,10 @@ export function getPrologueCopy(): PrologueCopy {
   return {
     missionBlock: 'MISIÓN:\nRecupera la señal perdida dentro del complejo abandonado.',
     objectiveBlock: 'OBJETIVO:\nSobrevive y alcanza la extracción.',
-    controlsBlock: 'CONTROLES:\nWASD mover\nMouse apuntar\n1/2/3 armas\nR recargar\nESC pausa',
-    continueLine: '[ ENTER PARA INICIAR ]',
-    backLine: '[ ESC PARA VOLVER AL MENÚ ]'
+    controlsBlock:
+      'WASD · mover\nMouse · apuntar\n1/2/3 · armas\nR · recargar\nESC · pausa\nMando · A iniciar · B volver · Start pausa',
+    continueLine: '[ ENTER / A / START PARA INICIAR ]',
+    backLine: '[ ESC / B PARA VOLVER AL MENÚ ]'
   };
 }
 
@@ -327,7 +338,9 @@ export function buildMainMenuLayout(width: number, height: number): MainMenuLayo
   const difficultyY = option3dY + 44;
   const settingsY = difficultyY + 36;
   const titleFrameCenterY = titleY - Math.round(titleToFirstLine * 0.2);
-  const footerY = Math.max(18, height - (shortViewport ? 16 : 22));
+  const safeBottomPad = shortViewport ? 22 : 28;
+  const footerHintsY = Math.max(24, height - safeBottomPad);
+  const footerMaxWidth = Math.max(220, Math.min(width - 40, shortViewport ? width - 48 : 760));
 
   return {
     centerX,
@@ -337,6 +350,7 @@ export function buildMainMenuLayout(width: number, height: number): MainMenuLayo
     difficultyY,
     settingsY,
     titleFrameCenterY,
-    footerY
+    footerHintsY,
+    footerMaxWidth
   };
 }

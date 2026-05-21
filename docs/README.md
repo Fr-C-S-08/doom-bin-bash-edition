@@ -15,6 +15,13 @@ Quick map for reviewers, demos, and handoff.
 | [runtime/cicd-validation.md](./runtime/cicd-validation.md) | Presentation-ready CI/CD validation checklist. |
 | [roadmap.md](./roadmap.md) | Historical academic roadmap + pointers to current state. |
 
+## LLM / Game Master (local Ollama)
+
+| Doc | Purpose |
+|-----|---------|
+| [llm/ollama-game-master.md](./llm/ollama-game-master.md) | **Integración LLM** — `npm run dev:full`, Ollama en Docker, eventos, fallback, demo manual. |
+| [runtime/docker-full.md](./runtime/docker-full.md) | Compose completo: Vite + Game Master + Ollama + bootstrap. |
+
 ## Demo & release
 
 | Doc | Purpose |
@@ -23,6 +30,7 @@ Quick map for reviewers, demos, and handoff.
 | [demo/raycast-demo-script.md](./demo/raycast-demo-script.md) | Presenter script extendido + pasada QA ~10 min. |
 | [demo/screenshots-plan.md](./demo/screenshots-plan.md) | Lista de screenshots y GIFs deseables (sin asumir que ya existen). |
 | [demo/release-checklist.md](./demo/release-checklist.md) | Pre-demo / pre-tag: test, lint, build, smoke, media, PR. |
+| [demo/final-delivery-checklist.md](./demo/final-delivery-checklist.md) | Checklist entrega universitaria / portfolio (CI, Docker, ADRs, demo 15 min). |
 | [playtest/raycast-feel-checklist.md](./playtest/raycast-feel-checklist.md) | Feel and regression notes. |
 | [assets/screenshots/SHOT_LIST.md](./assets/screenshots/SHOT_LIST.md) | Portfolio screenshot / GIF capture plan. |
 | [assets/screenshots/README.md](./assets/screenshots/README.md) | Naming + regeneration (`npm run capture:media`). |

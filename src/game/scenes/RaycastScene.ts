@@ -9,7 +9,7 @@ import {
 } from '../systems/EncounterPattern';
 import { KeySystem } from '../systems/KeySystem';
 import { TriggerSystem } from '../systems/TriggerSystem';
-import { getEnemyConfig, getRaycastEnemyRoleAbbrev } from '../entities/enemyConfig';
+import { getEnemyConfig } from '../entities/enemyConfig';
 import type { EnemyKind } from '../types/game';
 import {
   AudioFeedbackSystem,
@@ -19,6 +19,20 @@ import {
 } from '../systems/AudioFeedbackSystem';
 import type { DirectorEvent } from '../systems/DirectorEvents';
 import { DIRECTOR_STATE_LABELS, type DirectorDebugInfo, type DirectorState } from '../systems/DirectorState';
+import {
+  applyWeaponFireFeel,
+  applyWeaponSwitchFeel,
+  buildWeaponViewFeel,
+  createCombatFeelRuntimeState,
+  getCombatImpactAudioOptions,
+  getDeathFeedbackProfile,
+  getHitMarkerFeedbackTiming,
+  getMuzzleFlashDecayMs,
+  getWeaponFireAudioPitch,
+  shouldSkipGameplayDuringFreeze,
+  tickCombatFeelRuntime,
+  type CombatFeelRuntimeState
+} from '../raycast/RaycastCombatFeel';
 import { getRaycastCrosshairTargetInfo, RaycastCombatSystem } from '../raycast/RaycastCombatSystem';
 import {
   cloneRaycastEnemies,
@@ -28,6 +42,7 @@ import {
 } from '../raycast/RaycastEnemy';
 import {
   updateRaycastEnemies,
+  notifyRaycastGunfire,
   updateRaycastEnemyProjectiles,
   type RaycastEnemyProjectile
 } from '../raycast/RaycastEnemySystem';
@@ -98,6 +113,22 @@ import {
   type RaycastBossState
 } from '../raycast/RaycastBoss';
 import {
+  BOSS_INTRO_DURATION_MS,
+  getBossIntroCopy,
+  getDesperationPhaseLabel,
+  isBossDesperation,
+  tickDualBossCoordination
+} from '../raycast/RaycastBossAI';
+import {
+  adjustDirectorSpawnKind,
+  countAliveByKind,
+  formatRaycastEnemyIdentityLabel,
+  getRaycastEliteKillScoreBonus,
+  getRaycastEnemyIdentity,
+  getRaycastSpawnTelegraphMs,
+  rollRaycastEnemyVariant
+} from '../raycast/RaycastEnemyIdentity';
+import {
   createRaycastBossHazardState,
   getRaycastBossHazardMarkers,
   tickRaycastBossHazards,
@@ -140,9 +171,19 @@ import {
   applyRaycastVariantToBaseHealth,
   getRaycastFlashDurationMs,
   getRaycastVariantModifiers,
-  type RaycastEnemyVariant
 } from '../raycast/RaycastEnemyVariants';
 import type { RaycastSetpieceCue } from '../raycast/RaycastSetpiece';
+import {
+  buildRaycastPickupToastLayout,
+  createRaycastPickupToastQueue,
+  getRaycastPickupToastDisplay,
+  mapRaycastHealthPickupToastKind,
+  pruneRaycastPickupToastQueue,
+  pushRaycastPickupToast,
+  RAYCAST_PICKUP_TOAST_FADE_MS,
+  type RaycastPickupToastKind,
+  type RaycastPickupToastQueueState
+} from '../raycast/RaycastPickupToast';
 import {
   buildRaycastHudLayout,
   buildRaycastDebugLine,
@@ -186,7 +227,39 @@ import { buildRaycastRunSummary, computeRaycastRunMasteryRankParts } from '../ra
 import { RaycastPlayerController, type RaycastPlayerState } from '../raycast/RaycastPlayerController';
 import { RAYCAST_MOVEMENT } from '../raycast/RaycastMovement';
 import { RaycastRenderer, type RaycastBillboard } from '../raycast/RaycastRenderer';
+import {
+  createRaycastFrameStatsState,
+  formatRaycastDebugHudExtras,
+  formatRaycastPerfHudLine,
+  recordRaycastFrameSample,
+  type RaycastFrameStatsState
+} from '../raycast/RaycastFrameStats';
+import { buildRaycastGameMasterSnapshot } from '../raycast/RaycastGameMasterSnapshot';
+import { buildRaycastNarrationLayoutFromHud } from '../raycast/RaycastNarration';
+import { RaycastNarrationOverlay } from '../raycast/RaycastNarrationOverlay';
+import {
+  createRaycastAdaptiveQualityState,
+  getEffectiveMinimapStride,
+  updateAdaptiveMinimapStrideBoost,
+} from '../raycast/RaycastAdaptiveQuality';
 import { appendRaycastPlaytestTelemetry } from '../raycast/RaycastTelemetry';
+import { GameMasterNarrationBridge } from '../../services/gameMasterNarrationBridge';
+import type {
+  GameMasterNarrationEventId,
+  GameMasterNarrationTier,
+} from '../../services/gameMasterNarrationTypes';
+import { PLAYER_DEATH_GM_MESSAGE } from '../../services/gameMasterNarrationTypes';
+import type { GameMasterSource } from '../../services/gameMasterClient';
+import {
+  buildGameMasterObjectiveReminderMessage,
+  GM_OBJECTIVE_REMINDER_COOLDOWN_MS,
+} from '../../services/gameMasterObjectiveReminder';
+import {
+  formatGameMasterVoiceHudLabel,
+  getGameMasterVoiceTestPhrase,
+  speakGameMasterVoice,
+  stopGameMasterVoice,
+} from '../../services/gameMasterVoice';
 import {
   buildRaycastLowHealthWarningMessage,
   getRaycastFeedbackActions,
@@ -206,19 +279,79 @@ import {
   tickRaycastPassiveHeal
 } from '../raycast/RaycastPassiveHeal';
 import {
+  formatRaycastControlPauseBody,
   formatRaycastPauseMenuMxBody,
+  formatRaycastSettingsPauseBody,
   RAYCAST_PAUSE_MENU_ACTIONS,
-  RAYCAST_PAUSE_MENU_LABELS
+  RAYCAST_CONTROL_PAUSE_ROWS,
+  RAYCAST_PAUSE_MENU_LABELS,
+  RAYCAST_SETTINGS_PAUSE_ROWS
 } from '../raycast/RaycastPauseMenu';
+import { computeRaycastPausePanelLayout } from '../raycast/RaycastPausePanelLayout';
+import {
+  applyFpsTargetToGame,
+  cycleFpsTarget,
+  cycleMinimapQuality,
+  cycleRenderQuality,
+  formatFpsTargetLabel,
+  formatMinimapQualityLabel,
+  formatRenderQualityLabel,
+  getMinimapStrideForMinimapQuality,
+} from '../raycast/RaycastPerformanceSettings';
+import {
+  formatRaycastGamepadDebugLine,
+  formatRaycastGamepadStatusLabel,
+  resolveRaycastActiveInput,
+  type RaycastActiveInputKind,
+  type RaycastActiveInputSnapshot
+} from '../raycast/RaycastInputHelp';
+import { formatGameMasterHudStatusLine } from '../raycast/GameMasterHudStatus';
 import { getBillboardColor } from '../raycast/RaycastVisualTheme';
 import { getRaycastBossLevelId, resolveRaycastBossShortcutLevelId, type RaycastBossShortcutSlot } from '../raycast/RaycastBossShortcuts';
+import { RaycastGamepadInput } from '../systems/RaycastGamepadInput';
+import { RaycastTouchInput } from '../systems/RaycastTouchInput';
 import { palette } from '../theme/palette';
+import { getSaveManager } from '../save/SaveManager';
+import { prepareGameSession } from '../save/persistSessionSettings';
 import {
-  ensureSessionSettings,
+  getAimAssistLevel,
+  getCameraSmoothing,
+  getGameMasterNarrationDebug,
+  getGameMasterNarrationDurationMs,
+  getGameMasterNarrationEnabled,
+  getGameMasterVoiceEnabled,
+  getGameMasterVoiceVolume,
+  adjustGameMasterVoiceVolume,
+  getMinimapQuality,
+  getFpsTarget,
+  getRenderQuality,
+  setGameMasterNarrationDebug,
+  setMinimapQuality,
+  getGamepadInvertY,
+  getGamepadLeftDeadzone,
+  getGamepadRightDeadzone,
+  getGamepadSensitivity,
+  getGamepadVibrationEnabled,
   getMinimapDefaultVisible,
   getMouseSensitivity,
   getScreenshakeEnabled,
   getSessionMasterVolume,
+  getTouchButtonScale,
+  getTouchControlsEnabled,
+  getTouchJoystickDeadzone,
+  getTouchLookSensitivity,
+  setGameMasterNarrationEnabled,
+  setGameMasterVoiceEnabled,
+  setFpsTarget,
+  setRenderQuality,
+  setGamepadInvertY,
+  setGamepadLeftDeadzone,
+  setGamepadRightDeadzone,
+  setGamepadSensitivity,
+  setGamepadVibrationEnabled,
+  setMinimapDefaultVisible,
+  setMouseSensitivity,
+  setScreenshakeEnabled,
   setSessionMasterVolume
 } from '../sessionSettings';
 
@@ -241,8 +374,6 @@ interface RaycastSceneData {
 
 const DIRECTOR_SPAWN_TELEGRAPH_MS = 820;
 const ENCOUNTER_SPAWN_TELEGRAPH_MS = 980;
-const VISIBLE_SPAWN_TELEGRAPH_BONUS_MS = 260;
-const CLOSE_SPAWN_TELEGRAPH_BONUS_MS = 180;
 const DEV_SHORTCUT_ENABLED = import.meta.env.DEV;
 const BASE_PLAYER_MAX_HEALTH = 100;
 const REWARD_DAMAGE_STEP = 0.2;
@@ -251,14 +382,13 @@ const FIRE_SHAKE_DURATION_MS = 58;
 const FIRE_SHAKE_INTENSITY = 0.00105;
 const FIRE_SHAKE_INTENSITY_CAP = 0.0028;
 const FIRE_MUZZLE_ALPHA_CAP = 0.97;
-const PAUSE_PANEL_WIDTH = 620;
-const PAUSE_PANEL_HEIGHT = 428;
-const PAUSE_PANEL_CENTER_Y = GAME_HEIGHT * 0.52;
-const PAUSE_BODY_WRAP = PAUSE_PANEL_WIDTH - 36;
+type RaycastPausePanelMode = 'main' | 'settings' | 'control';
 
 export class RaycastScene extends Phaser.Scene {
   private raycastRenderer!: RaycastRenderer;
   private controller!: RaycastPlayerController;
+  private gamepadInput!: RaycastGamepadInput;
+  private touchInput!: RaycastTouchInput;
   private combat!: RaycastCombatSystem;
   private audioFeedback!: AudioFeedbackSystem;
   private gameDirector!: GameDirector;
@@ -312,10 +442,23 @@ export class RaycastScene extends Phaser.Scene {
   private directorSpawnCounter = 0;
   private readonly encounterPatternCooldownUntil = new Map<string, number>();
   private debugHudVisible = false;
+  private perfHudVisible = false;
+  private frameStats: RaycastFrameStatsState = createRaycastFrameStatsState();
+  private narrationOverlay!: RaycastNarrationOverlay;
+  private gameMasterNarration!: GameMasterNarrationBridge;
+  private lastGmSource: GameMasterSource | null = null;
+  private lastGmTier: GameMasterNarrationTier | null = null;
+  private adaptiveQuality = createRaycastAdaptiveQualityState();
+  private narrationOverlayTick = 0;
+  private lastObjectiveReminderAtMs = 0;
   private minimapVisible = true;
   private helpOverlayVisible = false;
   private gamePaused = false;
   private pauseSelectionIndex = 0;
+  private pauseControlSelectionIndex = 1;
+  private pausePanelMode: RaycastPausePanelMode = 'main';
+  private pauseSettingsSelectionIndex = 0;
+  private detectedActiveInputKind: RaycastActiveInputKind = 'keyboard_mouse';
   private passiveRegenHudActive = false;
   private passiveRegenHudLabel: string | null = null;
   private passiveHealFractionalCarry = 0;
@@ -343,6 +486,7 @@ export class RaycastScene extends Phaser.Scene {
   private pauseMenuBodyText!: Phaser.GameObjects.Text;
   private muzzleFlashAnchorY = GAME_HEIGHT - 54;
   private debugText!: Phaser.GameObjects.Text;
+  private perfText!: Phaser.GameObjects.Text;
   private healthText!: Phaser.GameObjects.Text;
   private targetText!: Phaser.GameObjects.Text;
   private weaponText!: Phaser.GameObjects.Text;
@@ -378,6 +522,9 @@ export class RaycastScene extends Phaser.Scene {
   private feedbackPulse!: Phaser.GameObjects.Rectangle;
   private corruptionVeil!: Phaser.GameObjects.Rectangle;
   private systemText!: Phaser.GameObjects.Text;
+  private pickupToastText!: Phaser.GameObjects.Text;
+  private pickupToastQueue: RaycastPickupToastQueueState = createRaycastPickupToastQueue();
+  private pickupToastLayout = { x: 0, y: 0, maxWidth: 320 };
   private crosshair!: Phaser.GameObjects.Text;
   private hitMarker!: Phaser.GameObjects.Text;
   private finalOverlay!: Phaser.GameObjects.Rectangle;
@@ -385,8 +532,11 @@ export class RaycastScene extends Phaser.Scene {
   private finalSummaryText!: Phaser.GameObjects.Text;
   private finalHintText!: Phaser.GameObjects.Text;
   private weaponOverlayFlashUntil = 0;
+  private combatFeelState: CombatFeelRuntimeState = createCombatFeelRuntimeState();
+  private freezeFrameUntil = 0;
   private bossTelegraphById = new Map<string, boolean>();
   private lastBossPhaseById = new Map<string, 1 | 2 | 3>();
+  private bossIntroUntil = 0;
   private lastCombatMessage: string = RAYCAST_ATMOSPHERE.messages.intro;
   private hudCss!: RaycastHudCssBundle;
   private combatMessageUntil = 0;
@@ -412,6 +562,7 @@ export class RaycastScene extends Phaser.Scene {
   private readonly handleExitToMenu = (): void => {
     if (!this.isRaycastSceneActive()) return;
     this.gamePaused = false;
+    this.stopGameMasterPresentation('exit_menu');
     this.scene.start('MenuScene');
   };
 
@@ -433,6 +584,7 @@ export class RaycastScene extends Phaser.Scene {
   };
 
   private restartCurrentLevel(): void {
+    this.stopGameMasterPresentation('restart_level');
     this.scene.restart({
       levelId: this.currentLevel.id,
       difficultyId: this.difficultyId,
@@ -453,6 +605,7 @@ export class RaycastScene extends Phaser.Scene {
     const breachWorldThree =
       this.currentLevel.id === RAYCAST_WORLD_TWO_CATALOG[RAYCAST_WORLD_TWO_CATALOG.length - 1]?.id &&
       nextId === RAYCAST_WORLD_THREE_CATALOG[0]?.id;
+    this.stopGameMasterPresentation('level_transition');
     this.scene.restart({
       levelId: nextId,
       difficultyId: this.difficultyId,
@@ -470,10 +623,12 @@ export class RaycastScene extends Phaser.Scene {
     if (this.gamePaused) return;
     if (!this.levelComplete || !this.episodeComplete || !this.currentLevel.bossConfig) return;
     if (RAYCAST_WORLD_TWO_CATALOG.length > 0) return;
+    this.stopGameMasterPresentation('scene_change');
     this.scene.start('RaycastWorldLockedScene');
   };
 
-  private readonly handleFireInput = (): void => {
+  private readonly handleFireInput = (pointer?: Phaser.Input.Pointer): void => {
+    if (pointer && (pointer.event as PointerEvent | undefined)?.pointerType === 'touch') return;
     if (this.gamePaused) return;
     this.fireWeapon();
   };
@@ -496,6 +651,50 @@ export class RaycastScene extends Phaser.Scene {
   private readonly handleToggleDebug = (): void => {
     if (this.gamePaused) return;
     this.applyDebugHudToggle();
+  };
+
+  private readonly handleTogglePerfHud = (): void => {
+    if (this.gamePaused) return;
+    this.perfHudVisible = !this.perfHudVisible;
+    this.perfText?.setVisible(this.perfHudVisible);
+  };
+
+  private readonly handleObjectiveReminderKey = (): void => {
+    if (!this.isRaycastSceneActive() || this.gamePaused || !this.playerAlive || this.levelComplete) {
+      return;
+    }
+    if (
+      !getGameMasterNarrationEnabled(this.registry) &&
+      !getGameMasterVoiceEnabled(this.registry)
+    ) {
+      return;
+    }
+    const now = this.time.now;
+    if (now - this.lastObjectiveReminderAtMs < GM_OBJECTIVE_REMINDER_COOLDOWN_MS) return;
+    this.lastObjectiveReminderAtMs = now;
+    const message = buildGameMasterObjectiveReminderMessage(
+      this.getObjectiveState(),
+      this.currentLevel.hudObjectiveLabels,
+    );
+    this.deliverGameMasterNarration(message, 'fallback', 'important');
+  };
+
+  private readonly handleGameMasterTestKey = (): void => {
+    if (!this.isRaycastSceneActive() || this.gamePaused) return;
+    if (getGameMasterVoiceEnabled(this.registry)) {
+      const phrase = getGameMasterVoiceTestPhrase();
+      if (getGameMasterNarrationEnabled(this.registry)) {
+        this.deliverGameMasterNarration(phrase, 'fallback', 'important');
+      } else {
+        speakGameMasterVoice(phrase, {
+          urgent: true,
+          volume: getGameMasterVoiceVolume(this.registry),
+          tier: 'important',
+        });
+      }
+      return;
+    }
+    this.emitGameMasterNarration('manual_debug', {}, `g-${Math.floor(this.time.now)}`);
   };
 
   private readonly handleToggleMinimap = (): void => {
@@ -575,6 +774,14 @@ export class RaycastScene extends Phaser.Scene {
   private readonly handleEscKey = (): void => {
     if (!this.isRaycastSceneActive()) return;
     if (this.gamePaused) {
+      if (this.pausePanelMode === 'control') {
+        this.closeControlSettingsPanel();
+        return;
+      }
+      if (this.pausePanelMode === 'settings') {
+        this.closeSettingsPanel();
+        return;
+      }
       this.closePauseMenu();
       return;
     }
@@ -585,21 +792,114 @@ export class RaycastScene extends Phaser.Scene {
     this.handleExitToMenu();
   };
 
+  private getActiveInputSnapshot(): RaycastActiveInputSnapshot {
+    return {
+      gamepadConnected: this.gamepadInput?.isConnected() ?? false,
+      touchActive: this.touchInput?.isActive() ?? false,
+      touchControlsEnabled: getTouchControlsEnabled(this.registry)
+    };
+  }
+
+  private resolveSceneActiveInput(): RaycastActiveInputKind {
+    return resolveRaycastActiveInput(this.getActiveInputSnapshot(), this.detectedActiveInputKind);
+  }
+
+  private markDetectedActiveInput(kind: RaycastActiveInputKind): void {
+    if (this.detectedActiveInputKind === kind) return;
+    this.detectedActiveInputKind = kind;
+    if (this.gamePaused) this.refreshPauseMenuBody();
+  }
+
+  private trackConnectedInputActivity(): void {
+    if (this.touchInput?.isActive()) {
+      this.markDetectedActiveInput('touch');
+      return;
+    }
+    if (this.gamepadInput?.isConnected()) {
+      this.markDetectedActiveInput('gamepad');
+    }
+  }
+
   private readonly handlePauseMenuUp = (): void => {
+    this.markDetectedActiveInput('keyboard_mouse');
     if (!this.gamePaused) return;
-    this.pauseSelectionIndex =
-      (this.pauseSelectionIndex + RAYCAST_PAUSE_MENU_LABELS.length - 1) % RAYCAST_PAUSE_MENU_LABELS.length;
+    if (this.pausePanelMode === 'control') {
+      this.pauseControlSelectionIndex = this.getWrappedControlSelectionIndex(-1);
+    } else if (this.pausePanelMode === 'settings') {
+      this.pauseSettingsSelectionIndex = this.getWrappedSettingsSelectionIndex(-1);
+    } else {
+      this.pauseSelectionIndex =
+        (this.pauseSelectionIndex + RAYCAST_PAUSE_MENU_LABELS.length - 1) % RAYCAST_PAUSE_MENU_LABELS.length;
+    }
     this.refreshPauseMenuBody();
   };
 
   private readonly handlePauseMenuDown = (): void => {
+    this.markDetectedActiveInput('keyboard_mouse');
     if (!this.gamePaused) return;
-    this.pauseSelectionIndex = (this.pauseSelectionIndex + 1) % RAYCAST_PAUSE_MENU_LABELS.length;
+    if (this.pausePanelMode === 'control') {
+      this.pauseControlSelectionIndex = this.getWrappedControlSelectionIndex(1);
+    } else if (this.pausePanelMode === 'settings') {
+      this.pauseSettingsSelectionIndex = this.getWrappedSettingsSelectionIndex(1);
+    } else {
+      this.pauseSelectionIndex = (this.pauseSelectionIndex + 1) % RAYCAST_PAUSE_MENU_LABELS.length;
+    }
     this.refreshPauseMenuBody();
+  };
+
+  private readonly handlePauseMenuLeft = (): void => {
+    this.markDetectedActiveInput('keyboard_mouse');
+    if (!this.gamePaused) return;
+    if (this.pausePanelMode === 'control' || this.pausePanelMode === 'settings') {
+      this.adjustPauseSubmenuSetting(-1);
+    }
+  };
+
+  private readonly handlePauseMenuRight = (): void => {
+    this.markDetectedActiveInput('keyboard_mouse');
+    if (!this.gamePaused) return;
+    if (this.pausePanelMode === 'control' || this.pausePanelMode === 'settings') {
+      this.adjustPauseSubmenuSetting(1);
+    }
+  };
+
+  private readonly handlePauseMenuPointerDown = (pointer?: Phaser.Input.Pointer): void => {
+    if (!this.gamePaused) return;
+    if (pointer && (pointer.event as PointerEvent | undefined)?.pointerType === 'touch') return;
+    this.handlePauseMenuConfirm();
+  };
+
+  private readonly handlePauseMenuWheel = (_pointer: Phaser.Input.Pointer, _gameObjects: unknown, _dx: number, dy: number): void => {
+    if (!this.gamePaused) return;
+    if (dy > 0) this.handlePauseMenuDown();
+    else if (dy < 0) this.handlePauseMenuUp();
   };
 
   private readonly handlePauseMenuConfirm = (): void => {
     if (!this.gamePaused) return;
+    if (this.pausePanelMode === 'control') {
+      if (RAYCAST_CONTROL_PAUSE_ROWS[this.pauseControlSelectionIndex] === 'back') {
+        this.closeControlSettingsPanel();
+        return;
+      }
+      this.adjustControlSetting(1);
+      return;
+    }
+
+    if (this.pausePanelMode === 'settings') {
+      const row = RAYCAST_SETTINGS_PAUSE_ROWS[this.pauseSettingsSelectionIndex];
+      if (row === 'back') {
+        this.closeSettingsPanel();
+        return;
+      }
+      if (row === 'gm_test') {
+        this.triggerGameMasterTestFromPause();
+        return;
+      }
+      this.adjustSettingsSetting(1);
+      return;
+    }
+
     const action = RAYCAST_PAUSE_MENU_ACTIONS[this.pauseSelectionIndex];
     switch (action) {
       case 'resume':
@@ -615,6 +915,12 @@ export class RaycastScene extends Phaser.Scene {
           rewardTier: this.rewardTier,
           runModifierId: this.runModifier?.id ?? null
         });
+        break;
+      case 'settings':
+        this.openSettingsPanel();
+        break;
+      case 'controls':
+        this.openControlSettingsPanel();
         break;
       case 'menu':
         this.closePauseMenu();
@@ -657,7 +963,8 @@ export class RaycastScene extends Phaser.Scene {
 
   create(): void {
     registerRaycastOptionalAssets(this);
-    ensureSessionSettings(this.registry);
+    prepareGameSession(this.registry);
+    this.applyPerformanceSettings();
     this.resetRuntimeState();
     this.cameras.main.setBackgroundColor(
       this.getWorldSegment() === 'world2' ? '#030612' : this.getWorldSegment() === 'world3' ? '#0c0604' : '#05070c'
@@ -666,13 +973,51 @@ export class RaycastScene extends Phaser.Scene {
     this.keySystem = new KeySystem();
     this.doorSystem = new DoorSystem(this.keySystem);
     this.triggerSystem = new TriggerSystem();
+    this.gamepadInput = new RaycastGamepadInput({
+      getSettings: () => ({
+        leftDeadzone: getGamepadLeftDeadzone(this.registry),
+        rightDeadzone: getGamepadRightDeadzone(this.registry),
+        lookSensitivity: getGamepadSensitivity(this.registry),
+        invertLookY: getGamepadInvertY(this.registry),
+        vibrationEnabled: getGamepadVibrationEnabled(this.registry)
+      })
+    });
+    this.touchInput = new RaycastTouchInput(this, {
+      mode: 'gameplay',
+      getSettings: () => ({
+        enabled: getTouchControlsEnabled(this.registry),
+        buttonScale: getTouchButtonScale(this.registry),
+        lookSensitivity: getTouchLookSensitivity(this.registry),
+        joystickDeadzone: getTouchJoystickDeadzone(this.registry)
+      })
+    });
+    this.touchInput.create();
     this.raycastRenderer = new RaycastRenderer(this, this.map, this.currentLevel);
     this.controller = new RaycastPlayerController(
       this,
       this.map,
       this.player,
       RAYCAST_MOVEMENT,
-      () => getMouseSensitivity(this.registry)
+      () => getMouseSensitivity(this.registry),
+      this.gamepadInput,
+      this.touchInput,
+      () => !this.gamePaused,
+      {
+        getLookFeelSettings: () => ({
+          aimAssist: getAimAssistLevel(this.registry),
+          cameraSmoothing: getCameraSmoothing(this.registry),
+          stickSensitivity: getGamepadSensitivity(this.registry),
+          touchLookSensitivity: getTouchLookSensitivity(this.registry),
+          gamepadLookDeadzone: getGamepadRightDeadzone(this.registry),
+          touchDeadzone: getTouchJoystickDeadzone(this.registry)
+        }),
+        getLookContext: () => ({
+          enemies: this.enemies,
+          wallDistance: castRay(this.map, this.player.x, this.player.y, this.player.angle, this.player.angle).distance
+        }),
+        isGamepadAimActive: () => this.gamepadInput.isConnected() && !this.gamePaused,
+        isTouchAimActive: () => this.touchInput.isActive() && !this.gamePaused
+      }
     );
     this.controller.create();
     this.controller.setMoveSpeedMultiplier(
@@ -981,6 +1326,21 @@ export class RaycastScene extends Phaser.Scene {
     this.feedbackPulse.setDepth(11);
     this.corruptionVeil = this.add.rectangle(GAME_WIDTH * 0.5, GAME_HEIGHT * 0.5, GAME_WIDTH, GAME_HEIGHT, RAYCAST_ATMOSPHERE.corruptionTint, 0);
     this.corruptionVeil.setDepth(9);
+    this.pickupToastLayout = buildRaycastPickupToastLayout(GAME_WIDTH, hudLayout);
+    this.pickupToastText = this.add
+      .text(this.pickupToastLayout.x, this.pickupToastLayout.y, '', {
+        fontSize: '12px',
+        fontStyle: '700',
+        color: '#edf7f3',
+        backgroundColor: '#020408b8',
+        padding: { x: 10, y: 5 },
+        align: 'center',
+        wordWrap: { width: this.pickupToastLayout.maxWidth }
+      })
+      .setOrigin(0.5, 0)
+      .setDepth(13)
+      .setAlpha(0)
+      .setVisible(false);
     this.systemText = this.add
       .text(GAME_WIDTH * 0.5, 58, getRaycastIntroMessageForSegment(this.getWorldSegment()), {
         fontSize: '20px',
@@ -1044,14 +1404,14 @@ export class RaycastScene extends Phaser.Scene {
       .rectangle(GAME_WIDTH * 0.5, GAME_HEIGHT * 0.5, GAME_WIDTH, GAME_HEIGHT, 0x020408, 0.52)
       .setDepth(40)
       .setVisible(false);
+    const pauseLayout = computeRaycastPausePanelLayout(this.scale.width, this.scale.height);
     this.pausePanel = this.add
-      .rectangle(GAME_WIDTH * 0.5, PAUSE_PANEL_CENTER_Y, PAUSE_PANEL_WIDTH, PAUSE_PANEL_HEIGHT, 0x050810, 0.93)
+      .rectangle(pauseLayout.centerX, pauseLayout.centerY, pauseLayout.panelWidth, pauseLayout.panelHeight, 0x050810, 0.93)
       .setStrokeStyle(1, 0x334858, 0.72)
       .setDepth(41)
       .setVisible(false);
-    const pausePanelTop = PAUSE_PANEL_CENTER_Y - PAUSE_PANEL_HEIGHT * 0.5;
     this.pauseTitleText = this.add
-      .text(GAME_WIDTH * 0.5, pausePanelTop + 14, 'SISTEMA EN PAUSA', {
+      .text(pauseLayout.centerX, pauseLayout.titleY, 'SISTEMA EN PAUSA', {
         fontFamily: 'monospace',
         fontSize: '20px',
         fontStyle: '700',
@@ -1063,14 +1423,14 @@ export class RaycastScene extends Phaser.Scene {
       .setDepth(42)
       .setVisible(false);
     this.pauseMenuBodyText = this.add
-      .text(GAME_WIDTH * 0.5 - PAUSE_BODY_WRAP * 0.5, pausePanelTop + 48, '', {
+      .text(pauseLayout.centerX - pauseLayout.bodyWrapWidth * 0.5, pauseLayout.bodyY, '', {
         fontFamily: 'monospace',
-        fontSize: '11px',
+        fontSize: pauseLayout.fontSize,
         fontStyle: '700',
         color: this.hudCss.keyText,
         align: 'left',
-        lineSpacing: 5,
-        wordWrap: { width: PAUSE_BODY_WRAP }
+        lineSpacing: pauseLayout.lineSpacing,
+        wordWrap: { width: pauseLayout.bodyWrapWidth }
       })
       .setOrigin(0, 0)
       .setDepth(42)
@@ -1087,6 +1447,35 @@ export class RaycastScene extends Phaser.Scene {
       .setVisible(false)
       .setDepth(10);
 
+    this.perfText = this.add
+      .text(12, 12, '', {
+        fontFamily: 'monospace',
+        fontSize: '11px',
+        color: this.hudCss.debugText,
+        backgroundColor: '#020408cc',
+        padding: { x: 8, y: 6 },
+        lineSpacing: 3
+      })
+      .setDepth(19)
+      .setVisible(false);
+
+    stopGameMasterVoice('scene_start');
+    const narrationHudLayout = buildRaycastHudLayout(GAME_WIDTH, GAME_HEIGHT);
+    this.narrationOverlay = new RaycastNarrationOverlay(
+      this,
+      buildRaycastNarrationLayoutFromHud(narrationHudLayout),
+      this.hudCss,
+      { displayMs: getGameMasterNarrationDurationMs(this.registry) },
+      { debug: getGameMasterNarrationDebug(this.registry) },
+    );
+    this.gameMasterNarration = new GameMasterNarrationBridge(
+      (message, source, tier) => this.deliverGameMasterNarration(message, source, tier),
+      { debug: getGameMasterNarrationDebug(this.registry) },
+    );
+    if (this.currentLevel.bossConfig) {
+      this.requestBossSpawnGameMasterNarration();
+    }
+
     this.sceneReady = true;
     this.cameras.main.fadeIn(460, 0, 0, 0);
     const modifierIntro = this.runModifier ? ` // MOD ${this.runModifier.label}` : '';
@@ -1097,34 +1486,64 @@ export class RaycastScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
+    const frameStartMs = performance.now();
+    let renderMs = 0;
+
+    this.pollGamepadInput();
+    this.pollTouchInput();
+    if (!this.gamePaused) {
+      this.updatePickupToast();
+      this.updateNarrationOverlay();
+    }
     this.combat?.tick(this.time.now);
-    if (this.playerAlive && !this.levelComplete && !this.gamePaused) {
-      this.controller.update(delta);
-      this.updatePlayerMetrics(delta);
+    const deltaMs = Math.min(Math.max(0, delta), 50);
+    const deltaSeconds = deltaMs / 1000;
+    const weapon = this.combat.getCurrentWeapon();
+    const reloadBlend = this.combat.getReloadBlend(this.time.now);
+    const moving = Math.hypot(this.player.velocity.x, this.player.velocity.y) > 0.05;
+    tickCombatFeelRuntime(this.combatFeelState, this.time.now, deltaSeconds, moving, weapon, reloadBlend);
+    const frozen = shouldSkipGameplayDuringFreeze(this.time.now, this.freezeFrameUntil);
+    const bossIntroActive = this.bossIntroUntil > this.time.now;
+    if (this.playerAlive && !this.levelComplete && !this.gamePaused && !frozen && !bossIntroActive) {
+      this.controller.update(deltaMs);
+      this.updatePlayerMetrics(deltaMs);
       this.updateLevelState();
-      this.updateEnemies(delta);
+      this.updateEnemies(deltaMs);
       this.updateGameDirector();
       this.updateAtmospherePulse();
       this.updateCorruptionSurge();
       this.updateBlackoutPulse();
       this.updateBossArenaHazards();
-      this.applyPassiveHeal(delta);
+      this.applyPassiveHeal(deltaMs);
     }
     const atmosphere = this.getAtmosphereOptions();
-    this.raycastRenderer.render(this.player, GAME_WIDTH, GAME_HEIGHT, atmosphere);
+    const viewKick = this.combatFeelState.cameraKickRad;
+    const renderPlayer =
+      viewKick > 0.0002 ? { ...this.player, angle: this.player.angle + viewKick } : this.player;
+    const renderStartMs = performance.now();
+    this.raycastRenderer.render(renderPlayer, GAME_WIDTH, GAME_HEIGHT, atmosphere);
+    renderMs += performance.now() - renderStartMs;
     this.refreshBillboardCache();
+    const billboardsStartMs = performance.now();
     this.raycastRenderer.renderBillboards(this.player, this.cachedBillboards, GAME_WIDTH, GAME_HEIGHT);
+    renderMs += performance.now() - billboardsStartMs;
+    const spritesStartMs = performance.now();
     this.raycastRenderer.renderEnemies(this.player, this.enemies, GAME_WIDTH, GAME_HEIGHT, this.time.now, atmosphere);
     this.bossStates.forEach((boss) => {
       this.raycastRenderer.renderBoss(this.player, boss, GAME_WIDTH, GAME_HEIGHT, this.time.now, atmosphere);
     });
     this.raycastRenderer.renderEnemyProjectiles(this.player, this.enemyProjectiles, GAME_WIDTH, GAME_HEIGHT);
+    renderMs += performance.now() - spritesStartMs;
+    const muzzleAlpha = this.getWeaponOverlayFlashAlpha();
+    const weaponStartMs = performance.now();
     this.raycastRenderer.renderWeaponOverlay(
-      this.combat.getCurrentWeapon(),
+      weapon,
       GAME_WIDTH,
       GAME_HEIGHT,
-      this.getWeaponOverlayFlashAlpha()
+      muzzleAlpha,
+      buildWeaponViewFeel(this.combatFeelState, weapon, this.time.now, moving, reloadBlend, muzzleAlpha)
     );
+    renderMs += performance.now() - weaponStartMs;
     this.corruptionVeil.setAlpha(this.time.now < this.blackoutPulseUntil ? Math.max(0.28, atmosphere.corruptionAlpha) : atmosphere.corruptionAlpha);
     const objectiveState = this.getObjectiveState();
     const objective = buildRaycastCurrentObjective(objectiveState);
@@ -1169,16 +1588,189 @@ export class RaycastScene extends Phaser.Scene {
     this.targetBarTrack.setVisible(false);
     this.targetBarFill.setVisible(false);
     this.updatePriorityMessage(objective, hint, objectiveState.recentBlockedReason !== undefined && objectiveState.recentBlockedReason !== null);
+    const frameMsNow = performance.now() - frameStartMs;
+    const fpsNow = frameMsNow > 0 ? 1000 / frameMsNow : this.frameStats.fps;
+    const fpsTarget = getFpsTarget(this.registry);
+    this.adaptiveQuality = updateAdaptiveMinimapStrideBoost(
+      this.adaptiveQuality,
+      fpsNow,
+      fpsTarget === 0 ? 120 : fpsTarget,
+    );
     this.renderMinimapThrottled();
     if (this.debugHudVisible) {
       this.debugText.setText(
         buildRaycastDebugLine({
           position: `${this.player.x.toFixed(1)},${this.player.y.toFixed(1)}`,
           directorLine: this.getDirectorDebugLine(),
-          message: this.getCurrentStatusMessage()
+          message: this.getCurrentStatusMessage(),
+          gameMasterLine: this.buildDebugHudExtrasLine(),
         })
       );
     }
+    if (this.perfHudVisible) {
+      const perfSample = {
+        frameMs: performance.now() - frameStartMs,
+        renderMs,
+        enemies: this.countLivingEnemies(),
+        projectiles: this.enemyProjectiles.length,
+        gmInFlight: this.gameMasterNarration?.isNarrationInFlight() ?? false,
+        gmNarrationEnabled: getGameMasterNarrationEnabled(this.registry),
+        gmVoiceEnabled: getGameMasterVoiceEnabled(this.registry),
+        fpsTarget: getFpsTarget(this.registry),
+        renderQualityLabel: formatRenderQualityLabel(getRenderQuality(this.registry)),
+        gmStatusLine: this.buildGameMasterHudStatusLine(),
+        gmSource: this.perfHudVisible ? this.lastGmSource : null,
+      };
+      this.frameStats = recordRaycastFrameSample(this.frameStats, perfSample);
+      this.perfText.setText(formatRaycastPerfHudLine(this.frameStats, perfSample));
+    }
+    if (this.gamePaused) {
+      const resolved = this.resolveSceneActiveInput();
+      if (resolved !== this.detectedActiveInputKind) {
+        this.detectedActiveInputKind = resolved;
+        this.refreshPauseMenuBody();
+      }
+    }
+  }
+
+  private pollGamepadInput(): void {
+    if (!this.gamepadInput) return;
+    this.gamepadInput.update();
+    const message = this.gamepadInput.consumeStatusMessage();
+    if (message) {
+      this.controller?.suppressLookInput(2);
+      this.setCombatMessage(message, 1600);
+    }
+
+    if (this.gamepadInput.consumePressed('toggleMap')) {
+      this.handleToggleMinimap();
+    }
+
+    if (this.gamepadInput.consumePressed('pause')) {
+      this.handleEscKey();
+    }
+
+    if (this.gamepadInput.consumePressed('cancel')) {
+      if (this.gamePaused) {
+        if (this.pausePanelMode === 'control') this.closeControlSettingsPanel();
+        else if (this.pausePanelMode === 'settings') this.closeSettingsPanel();
+        else this.closePauseMenu();
+      }
+      else this.handleEscKey();
+    }
+
+    if (this.gamepadInput.consumePressed('confirm')) {
+      if (this.gamePaused) {
+        this.handlePauseMenuConfirm();
+      } else if (this.levelComplete) {
+        if (!this.episodeComplete && this.nextLevelId !== null) this.handleAdvanceLevel();
+        else this.restartCurrentLevel();
+      }
+    }
+
+    if (!this.gamePaused) {
+      if (this.gamepadInput.consumePressed('reload')) {
+        this.handleRetry();
+      }
+
+      if (this.gamepadInput.consumePressed('fire')) {
+        this.handleFireInput();
+      }
+
+      if (this.gamepadInput.consumePressed('nextWeapon')) {
+        this.cycleWeapon(1);
+      }
+
+      if (this.gamepadInput.consumePressed('previousWeapon')) {
+        this.cycleWeapon(-1);
+      }
+    }
+
+    if (this.gamepadInput.consumePressed('navUp')) {
+      this.handlePauseMenuUp();
+    }
+
+    if (this.gamepadInput.consumePressed('navDown')) {
+      this.handlePauseMenuDown();
+    }
+
+    if (this.gamepadInput.consumePressed('navLeft')) {
+      this.handlePauseMenuLeft();
+    }
+
+    if (this.gamepadInput.consumePressed('navRight')) {
+      this.handlePauseMenuRight();
+    }
+
+    if (
+      this.gamepadInput.consumePressed('navUp') ||
+      this.gamepadInput.consumePressed('navDown') ||
+      this.gamepadInput.consumePressed('navLeft') ||
+      this.gamepadInput.consumePressed('navRight') ||
+      this.gamepadInput.consumePressed('confirm') ||
+      this.gamepadInput.consumePressed('cancel') ||
+      this.gamepadInput.consumePressed('pause')
+    ) {
+      this.markDetectedActiveInput('gamepad');
+    }
+    this.trackConnectedInputActivity();
+  }
+
+  private pollTouchInput(): void {
+    if (!this.touchInput) return;
+    this.touchInput.update();
+    const touchMessage = this.touchInput.consumeStatusMessage();
+    if (touchMessage) {
+      this.setCombatMessage(touchMessage, 1400);
+      this.controller?.suppressLookInput(2);
+    }
+
+    if (this.touchInput.consumePressed('toggleMap')) this.handleToggleMinimap();
+    if (this.touchInput.consumePressed('pause')) this.handleEscKey();
+    if (this.touchInput.consumePressed('cancel')) {
+      if (this.gamePaused) {
+        if (this.pausePanelMode === 'control') this.closeControlSettingsPanel();
+        else if (this.pausePanelMode === 'settings') this.closeSettingsPanel();
+        else this.closePauseMenu();
+      } else {
+        this.handleEscKey();
+      }
+    }
+
+    if (this.touchInput.consumePressed('confirm')) {
+      if (this.gamePaused) {
+        this.handlePauseMenuConfirm();
+      } else if (this.levelComplete) {
+        if (!this.episodeComplete && this.nextLevelId !== null) this.handleAdvanceLevel();
+        else this.restartCurrentLevel();
+      }
+    }
+
+    if (!this.gamePaused) {
+      if (this.touchInput.consumePressed('reload')) this.handleRetry();
+      if (this.touchInput.consumePressed('fire')) this.handleFireInput();
+      if (this.touchInput.consumePressed('weapon1')) this.handleWeaponSlotOne();
+      if (this.touchInput.consumePressed('weapon2')) this.handleWeaponSlotTwo();
+      if (this.touchInput.consumePressed('weapon3')) this.handleWeaponSlotThree();
+      if (this.touchInput.consumePressed('nextWeapon')) this.cycleWeapon(1);
+      if (this.touchInput.consumePressed('previousWeapon')) this.cycleWeapon(-1);
+    }
+    if (this.touchInput.consumePressed('navUp')) this.handlePauseMenuUp();
+    if (this.touchInput.consumePressed('navDown')) this.handlePauseMenuDown();
+    if (this.touchInput.consumePressed('navLeft')) this.handlePauseMenuLeft();
+    if (this.touchInput.consumePressed('navRight')) this.handlePauseMenuRight();
+    if (
+      this.touchInput.consumePressed('navUp') ||
+      this.touchInput.consumePressed('navDown') ||
+      this.touchInput.consumePressed('navLeft') ||
+      this.touchInput.consumePressed('navRight') ||
+      this.touchInput.consumePressed('confirm') ||
+      this.touchInput.consumePressed('cancel') ||
+      this.touchInput.consumePressed('pause')
+    ) {
+      this.markDetectedActiveInput('touch');
+    }
+    this.trackConnectedInputActivity();
   }
 
   private resetRuntimeState(): void {
@@ -1198,6 +1790,7 @@ export class RaycastScene extends Phaser.Scene {
     this.collectedSecrets.clear();
     this.collectedHealthPickups.clear();
     this.deferredPickupHints.clear();
+    this.pickupToastQueue = createRaycastPickupToastQueue();
     this.completedEncounterBeats.clear();
     this.enemiesKilled = 0;
     this.runPelletsFired = 0;
@@ -1237,6 +1830,8 @@ export class RaycastScene extends Phaser.Scene {
     this.blockedHintUntil = 0;
     this.lastLowHealthWarningAt = null;
     this.weaponOverlayFlashUntil = 0;
+    this.combatFeelState = createCombatFeelRuntimeState();
+    this.freezeFrameUntil = 0;
     this.nextAmbientCueAt = 0;
     const eventRng = createSeededLevelEventRng(`${this.currentLevel.id}:${Math.floor(this.time.now)}`);
     this.activeLevelEvent = selectRaycastLevelEvent({
@@ -1270,15 +1865,31 @@ export class RaycastScene extends Phaser.Scene {
     this.bossTelegraphById.clear();
     this.lastBossPhaseById.clear();
     this.bossStates = [];
+    const arenaOpts = { arenaLevelId: this.currentLevel.id };
     if (this.currentLevel.bossConfig) {
-      const primary = createRaycastBossState(this.currentLevel.bossConfig, this.time.now);
+      const primary = createRaycastBossState(this.currentLevel.bossConfig, this.time.now, arenaOpts);
       this.bossStates.push(primary);
       this.lastBossPhaseById.set(primary.id, primary.phase);
+      const behavior = this.currentLevel.bossConfig.behavior ?? 'volt-archon';
+      const intro = getBossIntroCopy(this.currentLevel.bossConfig.displayName, behavior);
+      this.bossIntroUntil = this.time.now + BOSS_INTRO_DURATION_MS;
+      this.setCombatMessage(`${intro.title} // ${intro.subtitle}`, BOSS_INTRO_DURATION_MS);
+      this.audioFeedback.play('bossPhaseShift', 0.72, this.time.now);
+      this.cameras.main.setZoom(1.07);
+      this.tweens.add({
+        targets: this.cameras.main,
+        zoom: 1,
+        duration: BOSS_INTRO_DURATION_MS,
+        ease: 'Cubic.easeOut'
+      });
+    } else {
+      this.bossIntroUntil = 0;
     }
     if (this.currentLevel.id === 'ash-judge-seal') {
       const twin = createRaycastBossState(
         { id: 'ash-judge-twin', displayName: 'Ash Judge Prime', x: 9.8, y: 7.1, maxHealth: 920, hitRadius: 0.75, behavior: 'ash-judge' },
-        this.time.now
+        this.time.now,
+        arenaOpts,
       );
       this.bossStates.push(twin);
       this.lastBossPhaseById.set(twin.id, twin.phase);
@@ -1310,16 +1921,27 @@ export class RaycastScene extends Phaser.Scene {
     keyboard?.on('keydown-SIX', this.handleBossShortcutThree);
     keyboard?.on('keydown-TAB', this.handleToggleDebug);
     keyboard?.on('keydown-BACKTICK', this.handleToggleDebug);
+    keyboard?.on('keydown-F3', this.handleToggleDebug);
+    keyboard?.on('keydown-P', this.handleTogglePerfHud);
+    keyboard?.on('keydown-G', this.handleGameMasterTestKey);
+    keyboard?.on('keydown-L', this.handleObjectiveReminderKey);
     keyboard?.on('keydown-UP', this.handlePauseMenuUp);
     keyboard?.on('keydown-DOWN', this.handlePauseMenuDown);
+    keyboard?.on('keydown-LEFT', this.handlePauseMenuLeft);
+    keyboard?.on('keydown-RIGHT', this.handlePauseMenuRight);
     keyboard?.on('keydown-ENTER', this.handlePauseMenuConfirm);
     this.input.on('pointerdown', this.handleFireInput);
+    this.input.on('wheel', this.handlePauseMenuWheel);
+    this.input.on('pointerdown', this.handlePauseMenuPointerDown);
     this.inputListenersRegistered = true;
   }
 
   private cleanupSceneLifecycle(): void {
+    this.stopGameMasterPresentation('scene_shutdown');
     if (!this.sceneReady && !this.inputListenersRegistered) return;
     this.sceneReady = false;
+    this.gamepadInput?.destroy();
+    this.touchInput?.destroy();
     this.controller?.destroy();
     this.cleanupInputListeners();
     this.killUiTweens();
@@ -1350,10 +1972,18 @@ export class RaycastScene extends Phaser.Scene {
     keyboard?.off('keydown-SIX', this.handleBossShortcutThree);
     keyboard?.off('keydown-TAB', this.handleToggleDebug);
     keyboard?.off('keydown-BACKTICK', this.handleToggleDebug);
+    keyboard?.off('keydown-F3', this.handleToggleDebug);
+    keyboard?.off('keydown-P', this.handleTogglePerfHud);
+    keyboard?.off('keydown-G', this.handleGameMasterTestKey);
+    keyboard?.off('keydown-L', this.handleObjectiveReminderKey);
     keyboard?.off('keydown-UP', this.handlePauseMenuUp);
     keyboard?.off('keydown-DOWN', this.handlePauseMenuDown);
+    keyboard?.off('keydown-LEFT', this.handlePauseMenuLeft);
+    keyboard?.off('keydown-RIGHT', this.handlePauseMenuRight);
     keyboard?.off('keydown-ENTER', this.handlePauseMenuConfirm);
     this.input.off('pointerdown', this.handleFireInput);
+    this.input.off('wheel', this.handlePauseMenuWheel);
+    this.input.off('pointerdown', this.handlePauseMenuPointerDown);
     this.inputListenersRegistered = false;
   }
 
@@ -1433,21 +2063,14 @@ export class RaycastScene extends Phaser.Scene {
 
   private withVariantApplied(enemy: RaycastEnemy, rng: () => number, indexSeed = 0): RaycastEnemy {
     const next = { ...enemy };
-    const roll = (rng() + indexSeed * 0.037) % 1;
     const eliteRateBonus = this.runModifier?.effects.eliteRateBonus ?? 0;
-    const eliteThreshold = 0.2 + eliteRateBonus;
-    let variant: RaycastEnemyVariant = 'BASE';
-    if (next.kind === 'RANGED' && roll < 0.3) variant = 'SNIPER';
-    else if (next.kind === 'SCRAMBLER' && roll < 0.22) variant = 'EXPLODER';
-    else if ((next.kind === 'BRUTE' || next.kind === 'RANGED') && roll < eliteThreshold) variant = 'ELITE';
-    else if (next.kind === 'GRUNT' && roll < 0.16) variant = 'BERSERK';
-    else if ((next.kind === 'GRUNT' || next.kind === 'BRUTE') && roll >= 0.16 && roll < 0.28) variant = 'SHIELDED';
-    else if (roll > 0.88) variant = 'CORRUPTED';
-    if (roll > 0.92 && next.kind === 'STALKER') next.kind = 'FLASHER';
-
-    const mods = getRaycastVariantModifiers(variant, this.activeLevelEvent, roll);
-    const baseCfg = getEnemyConfig(next.kind, 'raycast');
-    next.variant = variant;
+    const rolled = rollRaycastEnemyVariant(next.kind, rng, indexSeed, eliteRateBonus);
+    const mods = getRaycastVariantModifiers(rolled.variant, this.activeLevelEvent, rng());
+    const baseCfg = getEnemyConfig(rolled.kind, 'raycast');
+    next.kind = rolled.kind;
+    next.variant = rolled.variant;
+    next.eliteDisplayName = rolled.eliteDisplayName;
+    next.color = baseCfg.color;
     next.variantAccentColor = mods.outlineAccent;
     next.maxHealth = applyRaycastVariantToBaseHealth(baseCfg, mods);
     next.health = next.maxHealth;
@@ -1470,16 +2093,23 @@ export class RaycastScene extends Phaser.Scene {
     const result = this.combat.fire(this.player, this.enemies, this.map, this.time.now);
     if (!result.fired) return;
 
+    notifyRaycastGunfire(this.enemies, this.player.x, this.player.y, this.time.now);
+
     this.runPelletsFired += result.pelletCount;
     if (this.getLiveBosses().length > 0) {
       this.runBossPelletsFired += result.pelletCount;
     }
 
+    applyWeaponFireFeel(this.combatFeelState, result.weaponKind, this.time.now);
     this.flashMuzzle();
     const weaponAudio = getWeaponAudioPlan(result.weaponKind);
-    const firePitchMul = Phaser.Math.FloatBetween(0.97, 1.04);
-    this.audioFeedback.play(weaponAudio.cue, weaponAudio.intensity, this.time.now, { pitchMul: firePitchMul });
+    const firePitchMul = getWeaponFireAudioPitch(result.weaponKind);
+    this.audioFeedback.play(weaponAudio.cue, weaponAudio.intensity, this.time.now, {
+      pitchMul: firePitchMul,
+      lowFreqBoost: result.weaponKind === 'SHOTGUN' ? 1.14 : result.weaponKind === 'LAUNCHER' ? 1.06 : 1
+    });
     this.applyCombatShake(FIRE_SHAKE_DURATION_MS, Math.min(FIRE_SHAKE_INTENSITY_CAP, FIRE_SHAKE_INTENSITY));
+    if (result.weaponKind === 'SHOTGUN') this.gamepadInput?.vibrate('light');
 
     const liveBosses = this.getLiveBosses();
     if (liveBosses.length > 0) {
@@ -1502,36 +2132,58 @@ export class RaycastScene extends Phaser.Scene {
         if (killed) {
           this.runScore += this.applyEventScoreGain(addRaycastBossClearScore(0));
           this.enemiesKilled += 1;
+          this.cameras.main.shake(280, 0.0042);
+          this.cameras.main.flash(240, 255, 200, 100);
+          this.pulseFeedback(0xff4422, 0.22, 440);
+          this.setCombatMessage(`NÚCLEO DESTRUIDO // ${targetBoss.displayName.toUpperCase()}`, 2800);
           if (this.currentLevel.id === RAYCAST_LEVEL_BOSS.id && this.rewardTier < 1) {
             this.rewardTier = 1;
             this.playerMaxHealth = this.getBasePlayerMaxHealth();
             this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + 20);
             this.combat.setPlayerDamageMultiplier(this.getPlayerDamageMultiplier());
             this.setCombatMessage('CORE REWARD: +20% DMG  +20 MAX HP', 3400);
+            this.emitGameMasterNarration(
+              'legendary_pickup',
+              { pickupLabel: 'núcleo Volt Archon', rewardTier: this.rewardTier },
+              'core-volt',
+            );
           } else if (this.currentLevel.id === 'bloom-warden-pit' && this.rewardTier < 2) {
             this.rewardTier = 2;
             this.playerMaxHealth = this.getBasePlayerMaxHealth();
             this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + 24);
             this.combat.setPlayerDamageMultiplier(this.getPlayerDamageMultiplier());
             this.setCombatMessage('CORE REWARD: +40% DMG TOTAL  +44 MAX HP', 3600);
+            this.emitGameMasterNarration(
+              'legendary_pickup',
+              { pickupLabel: 'núcleo Bloom Warden', rewardTier: this.rewardTier },
+              'core-bloom',
+            );
           }
           this.audioFeedback.play('episodeComplete', 1, this.time.now);
-          this.pulseFeedback(0xffc36b, 0.16, 260);
-          this.cameras.main.flash(160, 255, 214, 120);
-          this.applyCombatShake(210, 0.003);
+          this.gamepadInput?.vibrate('boss');
         }
-        const impactPitch = Phaser.Math.FloatBetween(0.97, 1.03);
+        const bossImpactAudio = getCombatImpactAudioOptions(result.weaponKind, killed, bossCrit);
         if (killed) {
-          this.audioFeedback.play('kill', 1.02, this.time.now, { pitchMul: impactPitch });
+          this.freezeFrameUntil = this.time.now + getDeathFeedbackProfile(true).freezeMs;
+          this.audioFeedback.play('kill', 1.02 * bossImpactAudio.intensityMul, this.time.now, {
+            pitchMul: bossImpactAudio.pitchMul,
+            lowFreqBoost: bossImpactAudio.lowFreqBoost
+          });
         } else if (bossCrit) {
-          this.audioFeedback.play('hitCrit', 0.96, this.time.now, { pitchMul: impactPitch });
+          this.audioFeedback.play('hitCrit', 0.96 * bossImpactAudio.intensityMul, this.time.now, {
+            pitchMul: bossImpactAudio.pitchMul,
+            lowFreqBoost: bossImpactAudio.lowFreqBoost
+          });
         } else {
-          this.audioFeedback.play('hit', 0.86, this.time.now, { pitchMul: impactPitch });
+          this.audioFeedback.play('hit', 0.86 * bossImpactAudio.intensityMul, this.time.now, {
+            pitchMul: bossImpactAudio.pitchMul,
+            lowFreqBoost: bossImpactAudio.lowFreqBoost
+          });
         }
         this.pulseCrosshair(killed ? '#ff5b6f' : bossCrit ? '#8dffcf' : '#ffffff', killed ? 124 : bossCrit ? 102 : 88);
         this.flashHitMarker(killed, false, bossCrit);
         this.applyCombatShake(killed ? 96 : bossCrit ? 72 : 54, killed ? 0.00225 : bossCrit ? 0.00172 : 0.00132);
-        this.setCombatMessage(killed ? bossHud.coreShattered : bossHud.hullStressed);
+        if (!killed) this.setCombatMessage(bossHud.hullStressed);
         return;
       }
     }
@@ -1549,6 +2201,11 @@ export class RaycastScene extends Phaser.Scene {
     this.enemiesKilled += result.killCount;
     if (result.killedEnemyKinds.length > 0) {
       this.runScore += this.applyEventScoreGain(addRaycastKillScore(0, result.killedEnemyKinds));
+      const eliteBonus = getRaycastEliteKillScoreBonus(this.enemies, this.time.now);
+      if (eliteBonus > 0) {
+        this.runScore += this.applyEventScoreGain(eliteBonus);
+        this.setCombatMessage('ELITE TERMINATED // BONUS CORE', 1400);
+      }
     }
     const splashImpact = result.weaponKind === 'LAUNCHER' && result.splashHitCount > 0;
     if (splashImpact) {
@@ -1556,13 +2213,23 @@ export class RaycastScene extends Phaser.Scene {
       this.applyCombatShake(102, 0.00285);
       this.pulseFeedback(0xff8a3d, 0.075, 102);
     }
-    const hitPitch = Phaser.Math.FloatBetween(0.96, 1.03);
+    const impactAudio = getCombatImpactAudioOptions(result.weaponKind, result.killed, result.anyCrit);
     if (result.killed) {
-      this.audioFeedback.play('kill', 1.02, this.time.now, { pitchMul: hitPitch });
+      this.freezeFrameUntil = this.time.now + getDeathFeedbackProfile(false).freezeMs;
+      this.audioFeedback.play('kill', 1.02 * impactAudio.intensityMul, this.time.now, {
+        pitchMul: impactAudio.pitchMul,
+        lowFreqBoost: impactAudio.lowFreqBoost
+      });
     } else if (result.anyCrit) {
-      this.audioFeedback.play('hitCrit', 0.95, this.time.now, { pitchMul: hitPitch });
+      this.audioFeedback.play('hitCrit', 0.95 * impactAudio.intensityMul, this.time.now, {
+        pitchMul: impactAudio.pitchMul,
+        lowFreqBoost: impactAudio.lowFreqBoost
+      });
     } else {
-      this.audioFeedback.play('hit', 0.84, this.time.now, { pitchMul: hitPitch });
+      this.audioFeedback.play('hit', 0.84 * impactAudio.intensityMul, this.time.now, {
+        pitchMul: impactAudio.pitchMul,
+        lowFreqBoost: impactAudio.lowFreqBoost
+      });
     }
     if (result.killed) {
       this.cameras.main.flash(48, 255, 236, 210, false);
@@ -1636,18 +2303,17 @@ export class RaycastScene extends Phaser.Scene {
   private flashHitMarker(killed: boolean, splash: boolean, crit = false): void {
     const label = killed ? '*' : crit ? '!' : splash ? 'xx' : 'x';
     const color = killed ? '#ff3358' : crit ? '#5dffc8' : splash ? '#ffb36b' : '#ffffff';
-    const baseScale = killed ? 1.64 : crit ? 1.42 : splash ? 1.12 : 1.06;
-    const endScale = killed ? 2.12 : crit ? 1.82 : splash ? 1.52 : 1.48;
+    const timing = getHitMarkerFeedbackTiming(killed, crit, splash);
     this.hitMarker.setText(label);
     this.hitMarker.setColor(color);
-    this.hitMarker.setScale(baseScale);
+    this.hitMarker.setScale(timing.scaleStart);
     this.hitMarker.setAlpha(0.98);
     this.tweens.killTweensOf(this.hitMarker);
     this.tweens.add({
       targets: this.hitMarker,
       alpha: 0,
-      scale: endScale,
-      duration: killed ? 186 : crit ? 128 : splash ? 104 : 98,
+      scale: timing.scaleEnd,
+      duration: timing.durationMs,
       ease: 'Quad.easeOut'
     });
   }
@@ -1679,8 +2345,7 @@ export class RaycastScene extends Phaser.Scene {
 
   private getWeaponOverlayFlashAlpha(): number {
     if (this.time.now >= this.weaponOverlayFlashUntil) return 0;
-    const weapon = this.combat.getCurrentWeapon();
-    const decayWindow = weapon === 'LAUNCHER' ? 226 : weapon === 'SHOTGUN' ? 136 : 70;
+    const decayWindow = getMuzzleFlashDecayMs(this.combat.getCurrentWeapon());
     return Phaser.Math.Clamp((this.weaponOverlayFlashUntil - this.time.now) / decayWindow, 0, 1);
   }
 
@@ -1697,11 +2362,58 @@ export class RaycastScene extends Phaser.Scene {
     });
   }
 
+  private pushPickupToast(kind: RaycastPickupToastKind, amount?: number, label?: string): void {
+    this.pickupToastQueue = pushRaycastPickupToast(this.pickupToastQueue, {
+      kind,
+      nowMs: this.time.now,
+      amount,
+      label
+    });
+  }
+
+  private updatePickupToast(): void {
+    const toast = getRaycastPickupToastDisplay(this.pickupToastQueue, this.time.now);
+    this.pickupToastQueue = pruneRaycastPickupToastQueue(this.pickupToastQueue, this.time.now);
+    if (!toast || this.finalOverlay.visible || this.gamePaused) {
+      this.pickupToastText.setVisible(false).setAlpha(0);
+      return;
+    }
+    const remainingMs = toast.expiresAtMs - this.time.now;
+    const fadeAlpha =
+      remainingMs <= RAYCAST_PICKUP_TOAST_FADE_MS ? Phaser.Math.Clamp(remainingMs / RAYCAST_PICKUP_TOAST_FADE_MS, 0, 1) : 1;
+    this.pickupToastText
+      .setText(toast.text)
+      .setColor(toast.color)
+      .setPosition(this.pickupToastLayout.x, this.pickupToastLayout.y)
+      .setVisible(true)
+      .setAlpha(fadeAlpha * 0.94);
+  }
+
+  private buildGamepadStatusLabel(): string {
+    return formatRaycastGamepadStatusLabel(this.gamepadInput.getDebugInfo());
+  }
+
+  private buildGamepadDebugLine(): string {
+    return formatRaycastGamepadDebugLine(this.gamepadInput.getDebugInfo());
+  }
+
   private switchWeapon(slot: number): void {
     if (!this.canHandleRaycastInput()) return;
     if (!this.playerAlive || this.levelComplete) return;
+    const previous = this.combat.getCurrentWeapon();
     this.combat.switchWeaponSlot(slot);
+    applyWeaponSwitchFeel(this.combatFeelState, previous, this.combat.getCurrentWeapon(), this.time.now);
     this.setCombatMessage(`WEAPON ROUTED: ${this.combat.getWeaponLabel()}`);
+  }
+
+  private cycleWeapon(direction: number): void {
+    if (this.gamePaused) return;
+    if (!this.canHandleRaycastInput()) return;
+    if (!this.playerAlive || this.levelComplete) return;
+    const current = this.combat.getCurrentWeapon();
+    const nextSlot =
+      current === 'PISTOL' ? (direction > 0 ? 2 : 3) : current === 'SHOTGUN' ? (direction > 0 ? 3 : 1) : direction > 0 ? 1 : 2;
+    this.switchWeapon(nextSlot);
   }
 
   private countLivingEnemies(): number {
@@ -1767,30 +2479,303 @@ export class RaycastScene extends Phaser.Scene {
     this.debugText?.setVisible(this.debugHudVisible);
   }
 
+  private stopGameMasterPresentation(reason: string): void {
+    stopGameMasterVoice(reason);
+    this.narrationOverlay?.clearTransmission();
+  }
+
+  /** Death uses a fixed critical line locally — no async narrate (avoids stale voice/text). */
+  private deliverPlayerDeathGameMaster(): void {
+    this.stopGameMasterPresentation('player_death');
+    this.deliverGameMasterNarration(PLAYER_DEATH_GM_MESSAGE, 'fallback', 'critical');
+  }
+
+  private deliverGameMasterNarration(
+    message: string,
+    source: GameMasterSource,
+    tier: GameMasterNarrationTier = 'ambient',
+  ): void {
+    this.lastGmSource = source;
+    this.lastGmTier = tier;
+    const line = this.formatGameMasterOverlayMessage(message);
+    if (!line) return;
+    if (getGameMasterNarrationEnabled(this.registry)) {
+      this.narrationOverlay?.showNarration(line, tier);
+    }
+    if (getGameMasterVoiceEnabled(this.registry)) {
+      speakGameMasterVoice(line, {
+        volume: getGameMasterVoiceVolume(this.registry),
+        tier,
+        urgent: tier === 'critical',
+      });
+    }
+  }
+
+  private formatGameMasterOverlayMessage(message: string): string {
+    const normalized = message.replace(/\s+/g, ' ').trim();
+    if (!normalized) return '';
+    const maxLen = 148;
+    if (normalized.length <= maxLen) return normalized;
+    return `${normalized.slice(0, maxLen - 1)}…`;
+  }
+
+  private updateNarrationOverlay(): void {
+    const suppressed = this.gamePaused || this.finalOverlay.visible;
+    this.narrationOverlay.setSuppressed(suppressed);
+    if (suppressed) return;
+    this.narrationOverlayTick += 1;
+    if (this.narrationOverlayTick % 2 !== 0) return;
+    this.narrationOverlay.update(this.time.now);
+  }
+
+  private buildGameMasterHudStatusLine(): string {
+    return formatGameMasterHudStatusLine({
+      narrationEnabled: getGameMasterNarrationEnabled(this.registry),
+      inFlight: this.gameMasterNarration?.isNarrationInFlight() ?? false,
+      voiceEnabled: getGameMasterVoiceEnabled(this.registry),
+      lastTier: this.gameMasterNarration?.getLastHudTier() ?? this.lastGmTier,
+      lastSource: this.lastGmSource,
+    });
+  }
+
+  private buildGameMasterStatusForSettings(): string {
+    const voice = formatGameMasterVoiceHudLabel(getGameMasterVoiceEnabled(this.registry));
+    if (!getGameMasterNarrationEnabled(this.registry)) {
+      return getGameMasterVoiceEnabled(this.registry) ? `narr off · voice ${voice}` : 'off';
+    }
+    if (this.gameMasterNarration?.isNarrationInFlight()) return `pending · voice ${voice}`;
+    const narr =
+      this.lastGmSource === 'ollama' || this.lastGmSource === 'fallback'
+        ? this.lastGmSource
+        : 'idle';
+    return `${narr} · voice ${voice}`;
+  }
+
+  private buildDebugHudExtrasLine(): string {
+    return formatRaycastDebugHudExtras({
+      fpsCurrent: this.frameStats.fps,
+      fpsTarget: getFpsTarget(this.registry),
+      renderQualityLabel: formatRenderQualityLabel(getRenderQuality(this.registry)),
+      gmStatusLine: this.buildGameMasterHudStatusLine(),
+    });
+  }
+
+  private applyPausePanelLayout(): void {
+    const layout = computeRaycastPausePanelLayout(this.scale.width, this.scale.height);
+    this.pausePanel.setPosition(layout.centerX, layout.centerY);
+    this.pausePanel.setSize(layout.panelWidth, layout.panelHeight);
+    this.pauseTitleText.setPosition(layout.centerX, layout.titleY);
+    this.pauseMenuBodyText.setPosition(layout.centerX - layout.bodyWrapWidth * 0.5, layout.bodyY);
+    this.pauseMenuBodyText.setWordWrapWidth(layout.bodyWrapWidth);
+    this.pauseMenuBodyText.setFontSize(layout.fontSize);
+    this.pauseMenuBodyText.setLineSpacing(layout.lineSpacing);
+  }
+
+  private applyPerformanceSettings(): void {
+    applyFpsTargetToGame(this.game, getFpsTarget(this.registry));
+  }
+
+  private buildGameMasterSnapshotForScene(
+    extras: Partial<Parameters<typeof buildRaycastGameMasterSnapshot>[0]> = {},
+  ) {
+    const ammo = this.combat.getAmmoState();
+    const objectiveState = this.getObjectiveState();
+    const objectiveLabel = formatRaycastObjectiveHudLabel(
+      buildRaycastCurrentObjective(objectiveState),
+      this.currentLevel.hudObjectiveLabels,
+    );
+    return buildRaycastGameMasterSnapshot({
+      levelId: this.currentLevel.id,
+      levelName: this.currentLevel.name,
+      worldSegment: this.getWorldSegment(),
+      difficultyId: this.difficultyId,
+      playerHealth: this.playerHealth,
+      playerMaxHealth: this.playerMaxHealth,
+      equippedWeapon: this.combat.getCurrentWeapon(),
+      activeEnemies: this.countLivingEnemies(),
+      runStartedAtMs: this.runStartedAt,
+      ammoCurrent: ammo.current,
+      ammoCapacity: ammo.capacity,
+      currentWave: this.getActivatedTriggerCount() + 1,
+      directorState: this.lastDirectorState,
+      directorIntensityPercent: Math.round(Phaser.Math.Clamp(this.directorIntensity * 100, 0, 100)),
+      nowMs: this.time.now,
+      zoneId: this.activeZoneId,
+      objectiveLabel,
+      ...extras,
+    });
+  }
+
+  private emitGameMasterNarration(
+    eventId: GameMasterNarrationEventId,
+    extras: Partial<Parameters<typeof buildRaycastGameMasterSnapshot>[0]> = {},
+    dedupeSuffix?: string,
+  ): void {
+    if (!getGameMasterNarrationEnabled(this.registry)) return;
+    this.gameMasterNarration.requestEvent(
+      eventId,
+      this.buildGameMasterSnapshotForScene(extras),
+      dedupeSuffix ? { dedupeSuffix } : undefined,
+    );
+  }
+
+  private requestBossSpawnGameMasterNarration(): void {
+    const bossConfig = this.currentLevel.bossConfig;
+    if (!bossConfig) return;
+
+    this.emitGameMasterNarration(
+      'boss_spawn',
+      {
+        bossDisplayName: bossConfig.displayName,
+        bossBehavior: bossConfig.behavior ?? 'volt-archon',
+        twinBossPresent: this.currentLevel.id === 'ash-judge-seal',
+      },
+      bossConfig.id,
+    );
+  }
+
   private openPauseMenu(): void {
     this.gamePaused = true;
     this.pauseSelectionIndex = 0;
+    this.pausePanelMode = 'main';
+    this.applyPausePanelLayout();
+    this.touchInput?.resetActiveContactState();
+    this.touchInput?.setMode('ui');
     this.pauseDim.setVisible(true);
     this.pausePanel.setVisible(true);
     this.pauseTitleText.setVisible(true);
     this.pauseMenuBodyText.setVisible(true);
     this.applyPauseMinimapPresentation();
+    this.controller?.suppressLookInput(2);
     this.refreshPauseMenuBody();
     this.audioFeedback.play('uiSoftDeny', 0.62, this.time.now);
   }
 
   private closePauseMenu(): void {
     this.gamePaused = false;
+    this.pausePanelMode = 'main';
+    this.pauseControlSelectionIndex = 1;
+    this.touchInput?.resetActiveContactState();
+    this.touchInput?.setMode('gameplay');
     this.pauseDim.setVisible(false);
     this.pausePanel.setVisible(false);
     this.pauseTitleText.setVisible(false);
     this.pauseMenuBodyText.setVisible(false);
     this.restoreGameplayMinimapPresentation();
+    this.controller?.suppressLookInput(2);
     this.audioFeedback.play('uiConfirm', 0.72, this.time.now);
+  }
+
+  private openControlSettingsPanel(): void {
+    this.pausePanelMode = 'control';
+    this.pauseControlSelectionIndex = 1;
+    this.applyPausePanelLayout();
+    this.touchInput?.setMode('ui');
+    this.controller?.suppressLookInput(2);
+    this.refreshPauseMenuBody();
+    this.audioFeedback.play('uiConfirm', 0.68, this.time.now);
+  }
+
+  private closeControlSettingsPanel(): void {
+    this.pausePanelMode = 'main';
+    this.pauseSelectionIndex = Math.min(this.pauseSelectionIndex, RAYCAST_PAUSE_MENU_LABELS.length - 1);
+    this.touchInput?.setMode('ui');
+    this.controller?.suppressLookInput(2);
+    this.refreshPauseMenuBody();
+    this.audioFeedback.play('uiConfirm', 0.68, this.time.now);
+  }
+
+  private openSettingsPanel(): void {
+    this.pausePanelMode = 'settings';
+    this.pauseSettingsSelectionIndex = 0;
+    this.applyPausePanelLayout();
+    this.touchInput?.setMode('ui');
+    this.controller?.suppressLookInput(2);
+    this.refreshPauseMenuBody();
+    this.audioFeedback.play('uiConfirm', 0.68, this.time.now);
+  }
+
+  private closeSettingsPanel(): void {
+    this.pausePanelMode = 'main';
+    this.pauseSelectionIndex = Math.min(this.pauseSelectionIndex, RAYCAST_PAUSE_MENU_LABELS.length - 1);
+    this.touchInput?.setMode('ui');
+    this.controller?.suppressLookInput(2);
+    this.refreshPauseMenuBody();
+    this.audioFeedback.play('uiConfirm', 0.68, this.time.now);
+  }
+
+  private triggerGameMasterTestFromPause(): void {
+    const voiceOn = getGameMasterVoiceEnabled(this.registry);
+    const narrOn = getGameMasterNarrationEnabled(this.registry);
+    if (!voiceOn && !narrOn) {
+      this.setCombatMessage('GAME MASTER APAGADO', 1800);
+      this.refreshPauseMenuBody();
+      return;
+    }
+    if (voiceOn) {
+      const phrase = getGameMasterVoiceTestPhrase();
+      if (narrOn) {
+        this.deliverGameMasterNarration(phrase, 'fallback', 'important');
+      } else {
+        speakGameMasterVoice(phrase, {
+          urgent: true,
+          volume: getGameMasterVoiceVolume(this.registry),
+          tier: 'important',
+        });
+        this.setCombatMessage('PRUEBA DE VOZ GM', 1600);
+      }
+    } else {
+      this.emitGameMasterNarration('manual_debug', {}, `pause-g-${Math.floor(this.time.now)}`);
+    }
+    this.refreshPauseMenuBody();
+    this.audioFeedback.play('uiConfirm', 0.68, this.time.now);
   }
 
   private refreshPauseMenuBody(): void {
     const volPct = Math.round(this.audioMasterVolume * 100);
+    const activeInput = this.resolveSceneActiveInput();
+    if (this.pausePanelMode === 'settings') {
+      this.pauseMenuBodyText.setText(
+        formatRaycastSettingsPauseBody({
+          activeInput,
+          selectionIndex: this.pauseSettingsSelectionIndex,
+          gmNarration: getGameMasterNarrationEnabled(this.registry) ? 'SÍ' : 'NO',
+          gmVoice: getGameMasterVoiceEnabled(this.registry) ? 'SÍ' : 'NO',
+          gmVoiceVolume: `${Math.round(getGameMasterVoiceVolume(this.registry) * 100)}%`,
+          gmStatus: this.buildGameMasterStatusForSettings(),
+          gmTestHint: 'ENTER voz · G en juego',
+          fpsTarget: formatFpsTargetLabel(getFpsTarget(this.registry)),
+          renderQuality: formatRenderQualityLabel(getRenderQuality(this.registry)),
+          minimapQuality: formatMinimapQualityLabel(getMinimapQuality(this.registry)),
+          debugPerfHud: this.perfHudVisible ? 'SÍ' : 'NO',
+          debugGmLogs: getGameMasterNarrationDebug(this.registry) ? 'SÍ' : 'NO',
+        }),
+      );
+      return;
+    }
+    if (this.pausePanelMode === 'control') {
+      this.pauseMenuBodyText.setText(
+        formatRaycastControlPauseBody(
+          {
+            activeInput,
+            controlStatus: this.buildGamepadStatusLabel(),
+            gamepadDebugLine: this.buildGamepadDebugLine(),
+            gamepadLiveLine: this.gamepadInput.getDebugInfo().liveInputLine ?? undefined,
+            selectionIndex: this.pauseControlSelectionIndex,
+            mouseSensitivity: `x${getMouseSensitivity(this.registry).toFixed(2)}`,
+            gamepadSensitivity: `x${getGamepadSensitivity(this.registry).toFixed(2)}`,
+            leftDeadzone: getGamepadLeftDeadzone(this.registry).toFixed(2),
+            rightDeadzone: getGamepadRightDeadzone(this.registry).toFixed(2),
+            invertY: getGamepadInvertY(this.registry) ? 'SÍ' : 'NO',
+            vibration: getGamepadVibrationEnabled(this.registry) ? 'SÍ' : 'NO',
+            screenshake: getScreenshakeEnabled(this.registry) ? 'SÍ' : 'NO',
+            minimap: getMinimapDefaultVisible(this.registry) ? 'SÍ' : 'NO',
+          },
+          { columnChars: 31 }
+        )
+      );
+      return;
+    }
     const objectiveState = this.getObjectiveState();
     const objective = this.getEventAwareObjectiveText(
       formatRaycastObjectiveHudLabel(buildRaycastCurrentObjective(objectiveState), this.currentLevel.hudObjectiveLabels)
@@ -1808,6 +2793,7 @@ export class RaycastScene extends Phaser.Scene {
     this.pauseMenuBodyText.setText(
       formatRaycastPauseMenuMxBody(
         {
+          activeInput,
           volumePct: volPct,
           selectionIndex: this.pauseSelectionIndex,
           worldLine: this.pauseRunBannerLine,
@@ -1824,6 +2810,116 @@ export class RaycastScene extends Phaser.Scene {
         { columnChars: 28 }
       )
     );
+  }
+
+  private getWrappedControlSelectionIndex(delta: number): number {
+    const maxIndex = RAYCAST_CONTROL_PAUSE_ROWS.length - 1;
+    const selectableMin = 1;
+    const current = Math.max(selectableMin, Math.min(this.pauseControlSelectionIndex, maxIndex));
+    const next = current + delta;
+    if (next > maxIndex) return selectableMin;
+    if (next < selectableMin) return maxIndex;
+    return next;
+  }
+
+  private getWrappedSettingsSelectionIndex(delta: number): number {
+    const maxIndex = RAYCAST_SETTINGS_PAUSE_ROWS.length - 1;
+    const next = this.pauseSettingsSelectionIndex + delta;
+    if (next > maxIndex) return 0;
+    if (next < 0) return maxIndex;
+    return next;
+  }
+
+  private adjustPauseSubmenuSetting(direction: number): void {
+    if (this.pausePanelMode === 'control') {
+      this.adjustControlSetting(direction);
+      return;
+    }
+    if (this.pausePanelMode === 'settings') {
+      this.adjustSettingsSetting(direction);
+    }
+  }
+
+  private adjustSettingsSetting(direction: number): void {
+    const row = RAYCAST_SETTINGS_PAUSE_ROWS[this.pauseSettingsSelectionIndex];
+    const flip = (value: boolean): boolean => !value;
+    switch (row) {
+      case 'gm_narration':
+        setGameMasterNarrationEnabled(this.registry, flip(getGameMasterNarrationEnabled(this.registry)));
+        break;
+      case 'gm_voice':
+        setGameMasterVoiceEnabled(this.registry, flip(getGameMasterVoiceEnabled(this.registry)));
+        break;
+      case 'gm_voice_volume':
+        adjustGameMasterVoiceVolume(this.registry, direction * 0.1);
+        break;
+      case 'fps_target':
+        setFpsTarget(this.registry, cycleFpsTarget(getFpsTarget(this.registry), direction));
+        this.applyPerformanceSettings();
+        break;
+      case 'render_quality':
+        setRenderQuality(this.registry, cycleRenderQuality(getRenderQuality(this.registry), direction));
+        break;
+      case 'minimap_quality':
+        setMinimapQuality(this.registry, cycleMinimapQuality(getMinimapQuality(this.registry), direction));
+        break;
+      case 'debug_perf_hud':
+        this.perfHudVisible = flip(this.perfHudVisible);
+        this.perfText?.setVisible(this.perfHudVisible);
+        break;
+      case 'debug_gm_logs':
+        setGameMasterNarrationDebug(this.registry, flip(getGameMasterNarrationDebug(this.registry)));
+        this.narrationOverlay?.applyConfig(
+          { displayMs: getGameMasterNarrationDurationMs(this.registry) },
+          { debug: getGameMasterNarrationDebug(this.registry) },
+        );
+        break;
+      case 'gm_test':
+      case 'back':
+        return;
+      default:
+        return;
+    }
+    this.audioFeedback.play('uiConfirm', 0.62, this.time.now);
+    this.refreshPauseMenuBody();
+  }
+
+  private adjustControlSetting(direction: number): void {
+    const row = RAYCAST_CONTROL_PAUSE_ROWS[this.pauseControlSelectionIndex];
+    const flip = (value: boolean): boolean => !value;
+    switch (row) {
+      case 'mouse':
+        setMouseSensitivity(this.registry, getMouseSensitivity(this.registry) + direction * 0.05);
+        break;
+      case 'pad_sens':
+        setGamepadSensitivity(this.registry, getGamepadSensitivity(this.registry) + direction * 0.05);
+        break;
+      case 'left_deadzone':
+        setGamepadLeftDeadzone(this.registry, getGamepadLeftDeadzone(this.registry) + direction * 0.01);
+        break;
+      case 'right_deadzone':
+        setGamepadRightDeadzone(this.registry, getGamepadRightDeadzone(this.registry) + direction * 0.01);
+        break;
+      case 'invert_y':
+        setGamepadInvertY(this.registry, flip(getGamepadInvertY(this.registry)));
+        break;
+      case 'vibration':
+        setGamepadVibrationEnabled(this.registry, flip(getGamepadVibrationEnabled(this.registry)));
+        break;
+      case 'screenshake':
+        setScreenshakeEnabled(this.registry, flip(getScreenshakeEnabled(this.registry)));
+        break;
+      case 'minimap':
+        setMinimapDefaultVisible(this.registry, flip(getMinimapDefaultVisible(this.registry)));
+        break;
+      case 'back':
+        this.closeControlSettingsPanel();
+        return;
+      default:
+        return;
+    }
+    this.audioFeedback.play('uiConfirm', 0.62, this.time.now);
+    this.refreshPauseMenuBody();
   }
 
   private adjustAudioMasterVolume(delta: number): void {
@@ -1874,9 +2970,24 @@ export class RaycastScene extends Phaser.Scene {
   private updateEnemies(delta: number): void {
     const liveBosses = this.getLiveBosses();
     this.trySpawnBossAdds(liveBosses);
+    const bossPlayerCtx = {
+      x: this.player.x,
+      y: this.player.y,
+      alive: this.playerAlive,
+      stationaryMs: this.playerStationaryMs,
+      vx: this.player.velocity.x,
+      vy: this.player.velocity.y
+    };
     for (const boss of liveBosses) {
-      tickRaycastBossMovement(boss, this.map, { x: this.player.x, y: this.player.y, alive: this.playerAlive }, delta, this.time.now);
+      tickRaycastBossMovement(boss, this.map, bossPlayerCtx, delta, this.time.now);
       const bossHud = getRaycastBossHudLines(boss.displayName);
+      if (isBossDesperation(boss) && !boss.desperationAnnounced) {
+        boss.desperationAnnounced = true;
+        this.audioFeedback.play('bossPhaseShift', 1, this.time.now);
+        this.pulseFeedback(0xff3a4a, 0.14, 300);
+        this.cameras.main.shake(150, 0.0022);
+        this.setCombatMessage(getDesperationPhaseLabel(boss.behavior), 2200);
+      }
       const prevPhase = this.lastBossPhaseById.get(boss.id);
       if (prevPhase !== boss.phase) {
         if (boss.phase >= 2) {
@@ -1895,11 +3006,7 @@ export class RaycastScene extends Phaser.Scene {
         this.setCombatMessage(bossHud.telegraphLocked);
       }
       this.bossTelegraphById.set(boss.id, telegraphActive);
-      const bossShots = tickRaycastBossVolleys(
-        boss,
-        { x: this.player.x, y: this.player.y, alive: this.playerAlive, stationaryMs: this.playerStationaryMs },
-        this.time.now
-      );
+      const bossShots = tickRaycastBossVolleys(boss, bossPlayerCtx, this.time.now, this.map);
       if (bossShots.length > 0) {
         this.enemyProjectiles.push(...bossShots);
         this.setCombatMessage(bossHud.volleyInbound);
@@ -1938,8 +3045,12 @@ export class RaycastScene extends Phaser.Scene {
       this.pulseFeedback(0xd5b4ff, 0.08, 220);
     }
     if (activatedTelegraphs.length > 0) {
-      this.audioFeedback.play('spawn', 0.84, this.time.now);
-      this.pulseFeedback(0xffb347, 0.04, 120);
+      const materialized = this.enemies.find((enemy) => enemy.id === activatedTelegraphs[0]);
+      const identity = materialized ? getRaycastEnemyIdentity(materialized.kind) : null;
+      this.audioFeedback.play('spawn', 0.84, this.time.now, {
+        pitchMul: identity?.spawnAudioPitchMul ?? 1
+      });
+      this.pulseFeedback(identity?.telegraphColor ?? 0xffb347, 0.04, 120);
       this.setCombatMessage(activatedTelegraphs.length > 1 ? 'HOSTILES MATERIALIZADOS' : 'BRECHA HOSTIL ABIERTA');
     }
     if (enemyResult.spawnedProjectiles.length > 0) {
@@ -1960,33 +3071,7 @@ export class RaycastScene extends Phaser.Scene {
     );
     if (projectileDamage > 0) this.damagePlayer(projectileDamage);
     this.enemyProjectiles = this.enemyProjectiles.filter((projectile) => projectile.alive);
-    this.applyDualBossCoordination();
-    this.applyDualBossSpacing();
-  }
-
-  private applyDualBossCoordination(): void {
-    const live = this.getLiveBosses();
-    if (live.length < 2) return;
-    const a = live[0];
-    const b = live[1];
-    const midX = (a.x + b.x) * 0.5;
-    const midY = (a.y + b.y) * 0.5;
-    const toPlayerX = this.player.x - midX;
-    const toPlayerY = this.player.y - midY;
-    const len = Math.hypot(toPlayerX, toPlayerY) || 1;
-    const nx = toPlayerX / len;
-    const ny = toPlayerY / len;
-    const flankX = -ny;
-    const flankY = nx;
-    const ring = 1.1;
-    const targetAX = this.player.x + flankX * ring;
-    const targetAY = this.player.y + flankY * ring;
-    const targetBX = this.player.x - flankX * ring;
-    const targetBY = this.player.y - flankY * ring;
-    a.x += (targetAX - a.x) * 0.02;
-    a.y += (targetAY - a.y) * 0.02;
-    b.x += (targetBX - b.x) * 0.02;
-    b.y += (targetBY - b.y) * 0.02;
+    tickDualBossCoordination(this.getLiveBosses(), bossPlayerCtx, this.time.now);
   }
 
   private trySpawnBossAdds(liveBosses: RaycastBossState[]): void {
@@ -2015,25 +3100,6 @@ export class RaycastScene extends Phaser.Scene {
     this.nextBossAddSpawnAt = this.time.now + 1800;
   }
 
-  private applyDualBossSpacing(): void {
-    const live = this.getLiveBosses();
-    if (live.length < 2) return;
-    const a = live[0];
-    const b = live[1];
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const dist = Math.hypot(dx, dy) || 0.0001;
-    const minDist = a.hitRadius + b.hitRadius + 0.95;
-    if (dist >= minDist) return;
-    const push = (minDist - dist) * 0.5;
-    const nx = dx / dist;
-    const ny = dy / dist;
-    a.x -= nx * push;
-    a.y -= ny * push;
-    b.x += nx * push;
-    b.y += ny * push;
-  }
-
   private damagePlayer(amount: number): void {
     if (!this.playerAlive || this.levelComplete) return;
     const previousHealth = this.playerHealth;
@@ -2050,6 +3116,7 @@ export class RaycastScene extends Phaser.Scene {
     const shakeMag = Phaser.Math.Clamp(0.00275 + appliedDamage * 0.000065, 0.00275, 0.0045);
     this.cameras.main.shake(shakeDur, shakeMag);
     this.flashDamage(appliedDamage);
+    this.gamepadInput?.vibrate('damage');
     let damageIntensity = Phaser.Math.Clamp(0.58 + appliedDamage * 0.019, 0.58, 1.05);
     if (this.getLiveBosses().length > 0) damageIntensity = Math.min(1.08, damageIntensity + 0.065);
     if (this.playerHealth > 0) {
@@ -2060,6 +3127,7 @@ export class RaycastScene extends Phaser.Scene {
     this.setCombatMessage(`${getRaycastCombatMessageForSegment(this.getWorldSegment(), 'damage')} -${appliedDamage}`);
     if (this.playerHealth === 0) {
       this.playerAlive = false;
+      this.deliverPlayerDeathGameMaster();
       this.setCombatMessage('SEÑAL TERMINADA');
       this.cameras.main.shake(200, 0.0042);
       this.pulseFeedback(0xff1a3a, 0.14, 400);
@@ -2082,6 +3150,7 @@ export class RaycastScene extends Phaser.Scene {
       this.playFeedbackEvent('lowHealthWarning');
       this.pulseFeedback(this.playerHealth <= 25 ? 0xff5b6f : 0xffb347, 0.04, 120);
       this.setCombatMessage(buildRaycastLowHealthWarningMessage(this.playerHealth));
+      this.emitGameMasterNarration('low_health');
     }
   }
 
@@ -2101,7 +3170,12 @@ export class RaycastScene extends Phaser.Scene {
         this.audioFeedback.play('pickupKey', 1, this.time.now);
         this.pulseFeedback(RAYCAST_PALETTE.plasmaBright, 0.09, 140);
         this.cameras.main.shake(55, 0.0014);
-        this.setCombatMessage(`${getRaycastCombatMessageForSegment(this.getWorldSegment(), 'key')}: ${key.pickupObjectiveText}`);
+        this.pushPickupToast('key');
+        this.emitGameMasterNarration(
+          'pickup_key',
+          { pickupLabel: key.label ?? key.id, pickupKind: 'ficha' },
+          key.id,
+        );
       }
     });
 
@@ -2150,7 +3224,12 @@ export class RaycastScene extends Phaser.Scene {
       this.runScore += this.applyEventScoreGain(secretBoosted);
       this.audioFeedback.play('secret', 1, this.time.now);
       this.pulseFeedback(RAYCAST_PALETTE.plasmaBright, 0.11, 180);
-      this.setCombatMessage(`${getRaycastCombatMessageForSegment(this.getWorldSegment(), 'secret')}: ${secret.objectiveText}`);
+      this.pushPickupToast('secret');
+      this.emitGameMasterNarration(
+        'secret_found',
+        { pickupLabel: secret.billboardLabel ?? secret.id },
+        secret.id,
+      );
     });
 
     this.currentLevel.healthPickups.forEach((pickup) => {
@@ -2178,7 +3257,12 @@ export class RaycastScene extends Phaser.Scene {
       this.playFeedbackEvent('healthPickup');
       this.pulseFeedback(0xff8fb0, 0.08, 150);
       this.cameras.main.shake(45, 0.001);
-      this.setCombatMessage(`${pickup.pickupMessage} +${result.restored} HP`);
+      this.pushPickupToast(mapRaycastHealthPickupToastKind(pickup.kind), result.restored);
+      this.emitGameMasterNarration(
+        'pickup_health',
+        { pickupLabel: pickup.billboardLabel ?? pickup.id, pickupKind: pickup.kind },
+        pickup.id,
+      );
     });
 
     this.currentLevel.exits.forEach((exit) => {
@@ -2213,8 +3297,14 @@ export class RaycastScene extends Phaser.Scene {
       if (this.isTerminalArcSector()) {
         this.runScore += Math.round(RAYCAST_FULL_ARC_CLEAR_BONUS * clearMul);
       }
+      this.stopGameMasterPresentation('level_complete');
       this.levelComplete = true;
       this.episodeComplete = this.nextLevelId === null;
+      this.emitGameMasterNarration(
+        'objective_complete',
+        { pickupLabel: exit.objectiveText ?? exit.id },
+        exit.id,
+      );
       const masteryRank = computeRaycastRunMasteryRankParts({
         elapsedMs: this.time.now - this.runStartedAt,
         enemiesKilled: this.enemiesKilled,
@@ -2314,6 +3404,19 @@ export class RaycastScene extends Phaser.Scene {
       bossPelletsHitHostile: this.runBossPelletsHitHostile,
       bossDamageTaken: this.runBossDamageTaken,
       campaign: episodeComplete ? this.campaignMetrics : undefined
+    });
+    const runRank = this.runRankByLevelId.get(this.currentLevel.id) ?? 'C';
+    getSaveManager().recordRunOutcome({
+      levelId: this.currentLevel.id,
+      difficultyId: this.difficultyId,
+      outcome: isDeath ? 'death' : 'clear',
+      elapsedMs: this.time.now - this.runStartedAt,
+      score: this.runScore,
+      rank: runRank,
+      pelletsFired: this.runPelletsFired,
+      pelletsHitHostile: this.runPelletsHitHostile,
+      enemiesKilled: this.enemiesKilled,
+      secretsFound: this.collectedSecrets.size
     });
     writeRaycastHighScoreIfBetter(this.runScore);
     const highScore = readRaycastHighScore();
@@ -2446,6 +3549,11 @@ export class RaycastScene extends Phaser.Scene {
     this.pulseFeedback(RAYCAST_PALETTE.plasmaBright, 0.06, 140);
     this.cameras.main.shake(70, 0.0014);
     this.setCombatMessage(`${getRaycastCombatMessageForSegment(this.getWorldSegment(), 'doorOpen')}: ${door.openObjectiveText}`);
+    this.emitGameMasterNarration(
+      'door_opened',
+      { pickupLabel: door.openObjectiveText ?? door.id },
+      door.id,
+    );
   }
 
   private playFeedbackEvent(event: RaycastFeedbackEvent): void {
@@ -2535,7 +3643,11 @@ export class RaycastScene extends Phaser.Scene {
     if (!this.gamePaused) {
       this.minimapFrameCounter += 1;
       const pixelation = this.activeLevelEvent.effects.minimapPixelation ?? 0;
-      const stride = pixelation >= 0.5 ? 4 : pixelation > 0 ? 3 : 2;
+      const qualityStride = getMinimapStrideForMinimapQuality(getMinimapQuality(this.registry));
+      const stride = getEffectiveMinimapStride(
+        Math.max(qualityStride, pixelation >= 0.5 ? 4 : pixelation > 0 ? 3 : 2),
+        this.adaptiveQuality.minimapStrideBoost,
+      );
       if (this.minimapFrameCounter % stride !== 0) {
         return;
       }
@@ -2684,8 +3796,14 @@ export class RaycastScene extends Phaser.Scene {
       }
     });
 
-    if (spawn && !spawnedFromEvent) this.spawnDirectorEnemy(spawn);
-    extraSpawns.forEach((req) => this.spawnDirectorEnemy(req));
+    if (spawn && !spawnedFromEvent) this.spawnDirectorEnemy(this.balanceDirectorSpawn(spawn));
+    extraSpawns.forEach((req) => this.spawnDirectorEnemy(this.balanceDirectorSpawn(req)));
+  }
+
+  private balanceDirectorSpawn(spawn: SpawnRequest): SpawnRequest {
+    const rng = createSeededLevelEventRng(`${spawn.kind}:${this.time.now}:${this.directorSpawnCounter}`);
+    const kind = adjustDirectorSpawnKind(spawn.kind, countAliveByKind(this.enemies), rng);
+    return kind === spawn.kind ? spawn : { ...spawn, kind };
   }
 
   private announceDirectorStateChange(previousState: DirectorState | null, nextState: DirectorState): void {
@@ -2696,6 +3814,7 @@ export class RaycastScene extends Phaser.Scene {
     if (nextState === 'RECOVERY') {
       const triggered = this.tryTriggerEncounterBeat((beat) => beat.directorState === 'RECOVERY');
       if (!triggered) this.setCombatMessage(getRaycastCombatMessageForSegment(this.getWorldSegment(), 'recovery'));
+      this.emitGameMasterNarration('wave_clear');
     }
   }
 
@@ -2720,24 +3839,31 @@ export class RaycastScene extends Phaser.Scene {
     const rng = createSeededLevelEventRng(`${spawn.kind}:${spawn.x}:${spawn.y}:${this.time.now}`);
     const staged = this.withVariantApplied(enemy, rng, this.directorSpawnCounter);
     if (spawnPressure > 1) staged.speedMultiplier = (staged.speedMultiplier ?? 1) * Math.min(1.2, spawnPressure);
-    const isElite = staged.kind === 'BRUTE' || staged.kind === 'RANGED' || staged.kind === 'SCRAMBLER';
-    if (isElite) {
-      staged.damageMultiplier = (staged.damageMultiplier ?? 1) * (this.activeLevelEvent.effects.eliteDamageMultiplier ?? 1);
+    const identity = getRaycastEnemyIdentity(staged.kind);
+    if (staged.variant === 'ELITE') {
+      staged.damageMultiplier =
+        (staged.damageMultiplier ?? 1) * (this.activeLevelEvent.effects.eliteDamageMultiplier ?? 1);
       const eliteHealthMul = this.activeLevelEvent.effects.eliteHealthMultiplier ?? 1;
       staged.maxHealth = Math.max(1, Math.round(staged.maxHealth * eliteHealthMul));
       staged.health = staged.maxHealth;
+    } else if (staged.kind === 'BRUTE' || staged.kind === 'RANGED' || staged.kind === 'SCRAMBLER') {
+      staged.damageMultiplier = (staged.damageMultiplier ?? 1) * (this.activeLevelEvent.effects.eliteDamageMultiplier ?? 1);
+      const eliteHealthMul = this.activeLevelEvent.effects.eliteHealthMultiplier ?? 1;
+      if (eliteHealthMul > 1) {
+        staged.maxHealth = Math.max(1, Math.round(staged.maxHealth * eliteHealthMul));
+        staged.health = staged.maxHealth;
+      }
     }
     this.enemies.push(staged);
     this.directorSpawnCounter += 1;
-    this.audioFeedback.play('directorAmbush', 1, this.time.now);
+    this.audioFeedback.play('directorAmbush', 1, this.time.now, { pitchMul: identity.spawnAudioPitchMul * 0.98 });
     this.pulseCorruption();
-    this.pulseFeedback(0xff5b6f, 0.06, 160);
-    const roleTag = getRaycastEnemyRoleAbbrev(spawn.kind);
-    this.setCombatMessage(
-      this.getWorldSegment() === 'world2'
-        ? `STRATUM SIGNATURE: ${spawn.kind} (${roleTag})`
-        : `HOSTILE SIGNAL DETECTED: ${spawn.kind} (${roleTag})`
-    );
+    this.pulseFeedback(identity.telegraphColor, 0.06, 160);
+    if (staged.variant === 'ELITE' && staged.eliteDisplayName) {
+      this.setCombatMessage(`ELITE SIGNAL: ${staged.eliteDisplayName} // ${identity.roleTitle}`, 2400);
+    } else {
+      this.setCombatMessage(`HOSTILE: ${formatRaycastEnemyIdentityLabel(staged)}`, 1200);
+    }
   }
 
   private createTelegraphedSpawnEnemy(
@@ -2749,10 +3875,12 @@ export class RaycastScene extends Phaser.Scene {
     const visibleToPlayer = this.hasLineOfSightToPoint(safe.x, safe.y);
     const distanceToPlayer = Math.hypot(safe.x - this.player.x, safe.y - this.player.y);
     const baseDuration = source === 'director' ? DIRECTOR_SPAWN_TELEGRAPH_MS : ENCOUNTER_SPAWN_TELEGRAPH_MS;
-    const telegraphDurationMs =
-      baseDuration +
-      (visibleToPlayer ? VISIBLE_SPAWN_TELEGRAPH_BONUS_MS : 0) +
-      (distanceToPlayer <= 5.5 ? CLOSE_SPAWN_TELEGRAPH_BONUS_MS : 0);
+    const telegraphDurationMs = getRaycastSpawnTelegraphMs({
+      baseMs: baseDuration,
+      kind: spawn.kind,
+      visibleToPlayer,
+      distanceToPlayer
+    });
 
     return createTelegraphedRaycastEnemy({ ...spawn, x: safe.x, y: safe.y }, {
       telegraphStartedAt: this.time.now,

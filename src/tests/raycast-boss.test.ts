@@ -113,9 +113,9 @@ describe('raycast boss', () => {
     boss.nextVolleyReadyAt = 0;
     boss.pendingVolleyAt = 0;
     const t0 = 5000;
-    tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true }, t0);
+    tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true }, t0, RAYCAST_MAP_BOSS);
     expect(boss.pendingVolleyAt).toBeGreaterThan(t0);
-    const shots = tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true }, boss.pendingVolleyAt + 1);
+    const shots = tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true }, boss.pendingVolleyAt + 1, RAYCAST_MAP_BOSS);
     expect(shots.length).toBeGreaterThanOrEqual(1);
   });
 
@@ -124,9 +124,15 @@ describe('raycast boss', () => {
     boss.phase = 2;
     boss.nextVolleyReadyAt = 0;
     const t0 = 4000;
-    tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true, stationaryMs: 1200 }, t0);
-    const shots = tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true, stationaryMs: 1200 }, boss.pendingVolleyAt + 1);
-    expect(shots.length).toBe(7);
+    tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true, stationaryMs: 1200 }, t0, RAYCAST_MAP_BOSS);
+    boss.pendingVolleyKind = 'fan_wide';
+    const shots = tickRaycastBossVolleys(
+      boss,
+      { x: 2.5, y: 7.5, alive: true, stationaryMs: 1200 },
+      boss.pendingVolleyAt + 1,
+      RAYCAST_MAP_BOSS
+    );
+    expect(shots.length).toBe(8);
   });
 
   it('adds phase 2 bracket rails without inflating fan count when player is moving', () => {
@@ -134,8 +140,14 @@ describe('raycast boss', () => {
     boss.phase = 2;
     boss.nextVolleyReadyAt = 0;
     const t0 = 4500;
-    tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true, stationaryMs: 0 }, t0);
-    const shots = tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true, stationaryMs: 0 }, boss.pendingVolleyAt + 1);
+    tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true, stationaryMs: 0 }, t0, RAYCAST_MAP_BOSS);
+    boss.pendingVolleyKind = 'bracket';
+    const shots = tickRaycastBossVolleys(
+      boss,
+      { x: 2.5, y: 7.5, alive: true, stationaryMs: 0 },
+      boss.pendingVolleyAt + 1,
+      RAYCAST_MAP_BOSS
+    );
     expect(shots.length).toBe(5);
   });
 
@@ -178,28 +190,32 @@ describe('raycast boss', () => {
     boss.nextVolleyReadyAt = 0;
     boss.pendingVolleyAt = 0;
     const t0 = 5000;
-    tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true }, t0);
-    const p1 = tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true }, boss.pendingVolleyAt + 1);
+    tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true }, t0, RAYCAST_MAP_BOSS);
+    boss.pendingVolleyKind = 'twin_rails';
+    const p1 = tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true }, boss.pendingVolleyAt + 1, RAYCAST_MAP_BOSS);
     expect(p1.length).toBe(2);
 
     boss.phase = 2;
     boss.nextVolleyReadyAt = 0;
     boss.pendingVolleyAt = 0;
-    tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true, stationaryMs: 0 }, 6000);
-    const p2move = tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true, stationaryMs: 0 }, boss.pendingVolleyAt + 1);
+    tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true, stationaryMs: 0 }, 6000, RAYCAST_MAP_BOSS);
+    boss.pendingVolleyKind = 'cross';
+    const p2move = tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true, stationaryMs: 0 }, boss.pendingVolleyAt + 1, RAYCAST_MAP_BOSS);
     expect(p2move.length).toBe(6);
 
     boss.nextVolleyReadyAt = 0;
     boss.pendingVolleyAt = 0;
-    tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true, stationaryMs: 1200 }, 7000);
-    const p2camp = tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true, stationaryMs: 1200 }, boss.pendingVolleyAt + 1);
+    tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true, stationaryMs: 1200 }, 7000, RAYCAST_MAP_BOSS);
+    boss.pendingVolleyKind = 'cross';
+    const p2camp = tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true, stationaryMs: 1200 }, boss.pendingVolleyAt + 1, RAYCAST_MAP_BOSS);
     expect(p2camp.length).toBe(8);
 
     boss.phase = 3;
     boss.nextVolleyReadyAt = 0;
     boss.pendingVolleyAt = 0;
-    tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true, stationaryMs: 1200 }, 7500);
-    const p3camp = tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true, stationaryMs: 1200 }, boss.pendingVolleyAt + 1);
+    tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true, stationaryMs: 1200 }, 7500, RAYCAST_MAP_BOSS);
+    boss.pendingVolleyKind = 'mesh';
+    const p3camp = tickRaycastBossVolleys(boss, { x: 2.5, y: 7.5, alive: true, stationaryMs: 1200 }, boss.pendingVolleyAt + 1, RAYCAST_MAP_BOSS);
     expect(p3camp.length).toBeGreaterThan(p2camp.length);
   });
 
