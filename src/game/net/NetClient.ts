@@ -72,6 +72,10 @@ export class NetClient {
     this.listeners.get(type)?.delete(handler as MessageHandler<unknown>);
   }
 
+  clearListeners(): void {
+    this.listeners.clear();
+  }
+
   disconnect(): void {
     this.ws?.close();
     this.ws = null;

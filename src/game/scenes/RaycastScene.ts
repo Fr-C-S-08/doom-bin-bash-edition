@@ -489,6 +489,10 @@ export class RaycastScene extends Phaser.Scene {
   private netState: NetState | null = null;
   private netConnected = false;
   private netInputThrottle = 0;
+  // True during a server-driven level transition: keeps the WebSocket alive across scene.restart().
+  private netTransitioning = false;
+  private netServerUrl: string | null = null;
+  private netPlayerName: string | null = null;
   private minimapFrameCounter = 0;
   private readonly minimapKeyIdScratch: string[] = [];
   private readonly minimapDoorIdScratch: string[] = [];
@@ -619,6 +623,8 @@ export class RaycastScene extends Phaser.Scene {
   private readonly handleAdvanceLevel = (): void => {
     if (!this.isRaycastSceneActive()) return;
     if (this.gamePaused) return;
+    // In co-op, the server drives level transitions via the levelChange event — do not restart locally.
+    if (this.netConnected) return;
     if (!this.levelComplete || this.episodeComplete || this.nextLevelId === null) return;
     const nextId = this.nextLevelId;
     const breachWorldTwo =
@@ -981,60 +987,47 @@ export class RaycastScene extends Phaser.Scene {
     this.rewardTier = Math.max(0, data.rewardTier ?? 0);
     this.runModifier = getRunModifierById(data.runModifierId ?? null);
 
-    // ── Multiplayer: connect to co-op server ────────────────────────────────
-    // Connection is asynchronous; single-player runs correctly in the meantime.
-    if (data.netMode && data.serverUrl) {
-      this.netClient = new NetClient();
-      this.netState = new NetState();
-      this.netConnected = false;
+    // ── Multiplayer: connect to co-op server (or reuse live socket after level transition) ──
+    this.netTransitioning = false;
+
+    if (data.netMode) {
+      this.netServerUrl = data.serverUrl ?? null;
+      this.netPlayerName = data.playerName ?? 'Player';
       this.netInputThrottle = 0;
-      const playerName = data.playerName ?? 'Player';
-      const serverUrl = data.serverUrl;
-      this.netClient.connect(serverUrl, playerName).then(() => {
-        if (!this.netClient || !this.netState) return;
+
+      const existingClient = this.registry.get('coopNetClient') as NetClient | null;
+      if (existingClient) {
+        // Level transition: reuse the live WebSocket — no reconnect needed.
+        this.netClient = existingClient;
+        this.netState = (this.registry.get('coopNetState') as NetState | null) ?? new NetState();
+        this.registry.remove('coopNetClient');
+        this.registry.remove('coopNetState');
         this.netState.localPlayerId = this.netClient.playerId;
-
-        this.netClient.on<SnapshotMessage>('snapshot', (snap) => {
-          if (!this.netState) return;
-          this.netState.applySnapshot(snap);
-          this.syncEnemiesFromSnapshot(snap.enemies);
-          this.syncLevelStateFromSnapshot(snap);
-          const local = this.netState.getLocalPlayer();
-          if (local) {
-            this.playerHealth = local.hp;
-            if (!local.alive) {
-              this.playerAlive = false;
-            } else if (!this.playerAlive && local.alive) {
-              // Server respawned us — restore position and mark alive
-              this.playerAlive = true;
-              this.playerHealth = local.hp;
-              this.player.x = local.x;
-              this.player.y = local.y;
-              this.player.angle = local.yaw;
-            }
-          }
-        });
-
-        this.netClient.on<{ type: string; kind: string }>('event', (ev) => {
-          if (ev.kind === 'gameOver') {
-            // All players down — show overlay directly without calling
-            // showRunCompleteOverlay() so we don't write telemetry/save data
-            // for a co-op game-over (individual metrics don't apply here).
-            this.playerAlive = false;
-            this.finalOverlay?.setVisible(true).setAlpha(0.9);
-            this.finalTitleText?.setText('GAME OVER').setColor('#cc2222').setVisible(true);
-            this.finalSummaryText?.setText('Todos los jugadores han caído.').setVisible(true);
-            this.finalHintText?.setText('ESC → MENÚ').setVisible(true);
-          }
-        });
-
+        this.registerNetHandlers();
         this.netConnected = true;
-      }).catch((err: unknown) => {
-        console.warn('[RaycastScene] multiplayer connect failed:', err);
+      } else if (data.serverUrl) {
+        // Fresh connection from menu.
+        this.netClient = new NetClient();
+        this.netState = new NetState();
+        this.netConnected = false;
+        const playerName = this.netPlayerName;
+        const serverUrl = data.serverUrl;
+        this.netClient.connect(serverUrl, playerName).then(() => {
+          if (!this.netClient || !this.netState) return;
+          this.netState.localPlayerId = this.netClient.playerId;
+          this.registerNetHandlers();
+          this.netConnected = true;
+        }).catch((err: unknown) => {
+          console.warn('[RaycastScene] multiplayer connect failed:', err);
+          this.netClient = null;
+          this.netState = null;
+          this.netConnected = false;
+        });
+      } else {
         this.netClient = null;
         this.netState = null;
         this.netConnected = false;
-      });
+      }
     } else {
       this.netClient = null;
       this.netState = null;
@@ -2031,13 +2024,75 @@ export class RaycastScene extends Phaser.Scene {
     this.inputListenersRegistered = true;
   }
 
+  private registerNetHandlers(): void {
+    if (!this.netClient || !this.netState) return;
+
+    this.netClient.on<SnapshotMessage>('snapshot', (snap) => {
+      if (!this.netState) return;
+      this.netState.applySnapshot(snap);
+      this.syncEnemiesFromSnapshot(snap.enemies);
+      this.syncLevelStateFromSnapshot(snap);
+      const local = this.netState.getLocalPlayer();
+      if (local) {
+        this.playerHealth = local.hp;
+        if (!local.alive) {
+          this.playerAlive = false;
+        } else if (!this.playerAlive && local.alive) {
+          // Server respawned us — restore position and mark alive.
+          this.playerAlive = true;
+          this.playerHealth = local.hp;
+          this.player.x = local.x;
+          this.player.y = local.y;
+          this.player.angle = local.yaw;
+        }
+      }
+    });
+
+    this.netClient.on<{ type: string; kind: string; nextLevelId?: string }>('event', (ev) => {
+      if (ev.kind === 'gameOver') {
+        // All players down — show overlay directly without showRunCompleteOverlay()
+        // so we don't contaminate telemetry/save data with co-op game-over state.
+        this.playerAlive = false;
+        this.finalOverlay?.setVisible(true).setAlpha(0.9);
+        this.finalTitleText?.setText('GAME OVER').setColor('#cc2222').setVisible(true);
+        this.finalSummaryText?.setText('Todos los jugadores han caído.').setVisible(true);
+        this.finalHintText?.setText('ESC → MENÚ').setVisible(true);
+      } else if (ev.kind === 'levelChange' && ev.nextLevelId) {
+        // Server advanced all players to the next level.
+        // Park the live WebSocket in the registry so the new scene instance can reuse it.
+        this.registry.set('coopNetClient', this.netClient);
+        this.registry.set('coopNetState', this.netState);
+        this.netTransitioning = true;
+        this.stopGameMasterPresentation('level_transition');
+        this.scene.restart({
+          levelId: ev.nextLevelId,
+          netMode: true,
+          serverUrl: this.netServerUrl ?? undefined,
+          playerName: this.netPlayerName ?? 'Player',
+          difficultyId: this.difficultyId,
+          carryScore: this.runScore,
+          carryCampaignMetrics: this.campaignMetrics,
+          rewardTier: this.rewardTier,
+          runModifierId: this.runModifier?.id ?? null,
+        });
+      }
+    });
+  }
+
   private cleanupSceneLifecycle(): void {
     this.stopGameMasterPresentation('scene_shutdown');
-    // Multiplayer: close WebSocket on scene exit.
-    this.netClient?.disconnect();
+    if (this.netTransitioning) {
+      // Level transition: the live WebSocket is already saved in the registry.
+      // Drop old handlers (they close over the old scene's 'this') without closing the socket.
+      this.netClient?.clearListeners();
+    } else {
+      // Normal exit (menu, restart): close the socket.
+      this.netClient?.disconnect();
+    }
     this.netClient = null;
     this.netState = null;
     this.netConnected = false;
+    this.netTransitioning = false;
     if (!this.sceneReady && !this.inputListenersRegistered) return;
     this.sceneReady = false;
     this.gamepadInput?.destroy();
