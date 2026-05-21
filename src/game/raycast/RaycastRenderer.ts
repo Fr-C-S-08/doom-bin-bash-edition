@@ -1255,36 +1255,51 @@ export class RaycastRenderer {
       }
     }
 
-    const ceilingLineColor = this.blendColors(
+ const ceilingVeilColor = this.blendColors(
+  RAYCAST_ATMOSPHERE.voidColor,
+  zoneTheme.ceilingColor,
+  0.18,
+);
+
+const ceilingRibColor = this.blendColors(
   zoneTheme.patternColor,
-  zoneTheme.signalColor,
-  0.28,
+  RAYCAST_ATMOSPHERE.voidColor,
+  0.72,
 );
 
-this.graphics.lineStyle(
-  1,
-  ceilingLineColor,
-  0.003 + groundStyle.floorBandAlpha * 0.015,
-);
+// Techo oscuro y atmosférico.
+// No usa textura visible porque en screen-space se siente pegada a la cámara.
+this.graphics.fillStyle(ceilingVeilColor, 0.58);
+this.graphics.fillRect(0, 0, width, horizonY);
 
-for (let lane = -4; lane <= 4; lane += 1) {
-  const topX = width * 0.5 + lane * width * 0.16;
-  const horizonX = width * 0.5 + lane * width * 0.045;
-  this.graphics.lineBetween(topX, 0, horizonX, horizonY - 4);
-}
-
-for (let row = 1; row <= 7; row += 1) {
-  const t = row / 8;
-  const rowY = Phaser.Math.Linear(8, horizonY - 8, t * t);
-  const rowW = Phaser.Math.Linear(width * 0.95, width * 0.22, t);
+// Bandas muy sutiles, solo para que no se vea totalmente plano.
+for (let row = 1; row <= 5; row += 1) {
+  const t = row / 6;
+  const y = Phaser.Math.Linear(18, horizonY - 18, t * t);
+  const rowW = Phaser.Math.Linear(width * 0.96, width * 0.46, t);
   const rowX = width * 0.5 - rowW * 0.5;
 
   this.graphics.fillStyle(
-    ceilingLineColor,
-    (0.035 + t * 0.045) * (0.6 + groundStyle.floorBandAlpha),
+    ceilingRibColor,
+    0.018 + t * 0.022,
   );
-  this.graphics.fillRect(rowX, rowY, rowW, Math.max(1, 2 - t));
+  this.graphics.fillRect(rowX, y, rowW, 2);
 }
+
+// Oscurecimiento superior y lateral para mantener el look Doom 64.
+this.graphics.fillStyle(RAYCAST_ATMOSPHERE.voidColor, 0.18);
+this.graphics.fillRect(0, 0, width, horizonY * 0.18);
+
+this.graphics.fillStyle(RAYCAST_ATMOSPHERE.voidColor, 0.12);
+this.graphics.fillTriangle(0, 0, width * 0.22, horizonY, 0, horizonY);
+this.graphics.fillTriangle(
+  width,
+  0,
+  width - width * 0.22,
+  horizonY,
+  width,
+  horizonY,
+);
     for (let y = horizonY; y < height; y += 4) {
       const t = (y - horizonY) / Math.max(1, height - horizonY);
       const bandIndex = Math.floor((y - horizonY) / 4);
