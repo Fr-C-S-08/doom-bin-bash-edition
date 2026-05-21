@@ -22,6 +22,11 @@ export const RAYCAST_OPTIONAL_TEXTURE_KEYS = {
   wall02: "raycast_level_wall_02",
   door01: 'raycast_level_door_01',
   door02: 'raycast_level_door_02',
+  floor01: 'raycast_level_floor_01',
+  pickupHealth: "raycast_pickup_health",
+  pickupToken: "raycast_pickup_token",
+  pickupSecret: "raycast_pickup_secret",
+  ceiling01: 'raycast_level_ceiling_01',
 } as const;
 
 export const RAYCAST_ENEMY_TEXTURE_KEYS: Record<
@@ -79,6 +84,28 @@ export const RAYCAST_ENEMY_TEXTURE_KEYS: Record<
 };
 
 const OPTIONAL_IMAGE_ASSETS = [
+  //HEATLH
+    // PICKUPS
+  {
+    key: RAYCAST_OPTIONAL_TEXTURE_KEYS.pickupHealth,
+    path: "assets/raycast/pickups/health_pickup.png",
+  },
+  
+  {
+  key: RAYCAST_OPTIONAL_TEXTURE_KEYS.pickupToken,
+  path: "assets/raycast/pickups/token_pickup.png",
+  },
+  
+  {
+  key: RAYCAST_OPTIONAL_TEXTURE_KEYS.pickupSecret,
+  path: "assets/raycast/pickups/secret_pickup.png",
+  },
+  //TECHO
+  {
+  key: RAYCAST_OPTIONAL_TEXTURE_KEYS.ceiling01,
+  path: 'assets/raycast/levels/ceilings/ceiling_01.png',
+  },
+
   //PUERTAS
   {
   key: RAYCAST_OPTIONAL_TEXTURE_KEYS.door01,
