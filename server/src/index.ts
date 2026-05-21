@@ -21,6 +21,44 @@ import { ServerWorld } from './ServerWorld.js';
 const PORT = Number(process.env.PORT ?? DEFAULT_SERVER_PORT);
 const GAME_CLIENT_ORIGIN = process.env.GAME_CLIENT_ORIGIN ?? 'http://localhost:5173';
 
+/**
+ * Returns true when a WebSocket Origin header should be allowed.
+ *
+ * Accepted:
+ *   - undefined  — Node.js test clients send no Origin header.
+ *   - localhost / 127.0.0.1 — loopback, any port.
+ *   - RFC-1918 private ranges: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16.
+ *   - The value of GAME_CLIENT_ORIGIN (env-configured production origin).
+ *
+ * Everything else (public IPs, arbitrary hostnames) is rejected.
+ */
+export function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return true;
+  if (origin === GAME_CLIENT_ORIGIN) return true;
+
+  let hostname: string;
+  try {
+    hostname = new URL(origin).hostname;
+  } catch {
+    return false;
+  }
+
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return true;
+
+  // Parse dotted-decimal IPv4 and check RFC-1918 private ranges.
+  const parts = hostname.split('.');
+  if (parts.length !== 4) return false;
+  const octets = parts.map(Number);
+  if (octets.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false;
+
+  const [a, b] = octets as [number, number, number, number];
+  if (a === 10) return true;                           // 10.0.0.0/8
+  if (a === 172 && b >= 16 && b <= 31) return true;   // 172.16.0.0/12
+  if (a === 192 && b === 168) return true;             // 192.168.0.0/16
+
+  return false;
+}
+
 // ── Express app (game master HTTP routes) ────────────────────────────────────
 
 const app = express();
@@ -63,15 +101,11 @@ export function createServer(port: number): GameServer {
 
   const httpServer = createHttpServer(app);
 
-  // WebSocket connections are NOT governed by the Express CORS middleware — that
-  // only covers HTTP requests. We validate the Origin header here instead.
-  // TODO: tighten to an explicit allowlist once a production origin is stable.
+  // WebSocket connections are NOT governed by the Express CORS middleware —
+  // that only covers HTTP requests. We validate the Origin header here instead.
   const wss = new WebSocketServer({
     server: httpServer,
-    verifyClient: ({ origin }: { origin: string | undefined }) => {
-      if (!origin) return true; // Node.js test clients send no Origin header
-      return origin === GAME_CLIENT_ORIGIN || origin.startsWith('http://localhost');
-    },
+    verifyClient: ({ origin }: { origin: string | undefined }) => isAllowedOrigin(origin),
   });
 
   // Tick loop: simulate world state and broadcast snapshot at 20 Hz
