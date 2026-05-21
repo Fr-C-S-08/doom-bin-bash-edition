@@ -3,7 +3,7 @@ import type { SnapshotMessage, ServerEvent } from '../../shared/protocol.js';
 import { tickEnemies, findTargetPlayer } from './EnemySystem.js';
 import { DirectorSystem } from './DirectorSystem.js';
 import { cloneRaycastEnemies, createRaycastEnemy, type RaycastEnemy } from '../../src/game/raycast/RaycastEnemy.js';
-import { findRaycastZoneId, RAYCAST_LEVEL } from '../../src/game/raycast/RaycastLevel.js';
+import { cloneRaycastMap, findRaycastZoneId, isNearPoint, openRaycastDoor, RAYCAST_LEVEL } from '../../src/game/raycast/RaycastLevel.js';
 import type { RaycastMap } from '../../src/game/raycast/RaycastMap.js';
 import type { SpawnRequest } from '../../src/game/systems/GameDirector.js';
 import { findEnemyInCrosshair } from '../../src/game/raycast/RaycastCombatSystem.js';
@@ -11,12 +11,15 @@ import { castRay } from '../../src/game/raycast/RaycastMap.js';
 import { applyDamage } from '../../src/game/systems/CombatSystem.js';
 import { WEAPON_ORDER, getWeaponConfig } from '../../src/game/systems/WeaponConfig.js';
 import { TriggerSystem } from '../../src/game/systems/TriggerSystem.js';
+import { KeySystem } from '../../src/game/systems/KeySystem.js';
+import { DoorSystem } from '../../src/game/systems/DoorSystem.js';
 import { RESPAWN_COOLDOWN_MS, TICK_INTERVAL_MS } from '../../shared/constants.js';
 
 export class ServerWorld {
   private readonly playerStates = new Map<string, PlayerState>();
   private readonly enemies: RaycastEnemy[] = cloneRaycastEnemies(RAYCAST_LEVEL);
-  private readonly map: RaycastMap = RAYCAST_LEVEL.map;
+  // Cloned so that openRaycastDoor mutations are isolated to this instance.
+  private readonly map: RaycastMap = cloneRaycastMap(RAYCAST_LEVEL.map);
   private readonly director = new DirectorSystem(
     RAYCAST_LEVEL.director.config,
     RAYCAST_LEVEL.director.spawnPoints
@@ -24,6 +27,11 @@ export class ServerWorld {
   // TriggerSystem tracks which level triggers have fired (once: true semantics).
   // In co-op, the first alive player to enter a trigger zone activates it.
   private readonly triggerSystem = new TriggerSystem();
+  // KeySystem + DoorSystem mirror the client-side systems. The server is
+  // authoritative: it detects pickups and door openings by player proximity,
+  // then broadcasts the state via the snapshot.
+  private readonly keySystem = new KeySystem();
+  private readonly doorSystem = new DoorSystem(this.keySystem);
   private serverTime = 0;
   private currentTick = 0;
   private totalKills = 0;
@@ -113,14 +121,52 @@ export class ServerWorld {
       }
     }
 
-    // 0b. Process level triggers for every alive player.
+    const alivePlayers = players.filter((p) => p.alive);
+
+    // 0a. Detect key pickups by player proximity (server-authoritative).
+    // Mirrors RaycastScene.updateLevelState() — first alive player within the
+    // key's radius picks it up. collect() is idempotent so concurrent proximity
+    // from multiple players is safe.
+    for (const key of RAYCAST_LEVEL.keys) {
+      if (this.keySystem.hasKey(key.id)) continue;
+      for (const player of alivePlayers) {
+        if (isNearPoint(player.x, player.y, key)) {
+          this.keySystem.collect(key);
+          this.pendingEvents.push({ type: 'event', kind: 'keyPickup', color: key.id, by: player.name });
+          break;
+        }
+      }
+    }
+
+    // 0b. Detect door openings by player proximity (server-authoritative).
+    // Uses radius 0.78 to match the client (RaycastScene.updateLevelState).
+    // Opening a door mutates the server map grid so enemy AI and spawn
+    // placement stop treating that tile as a wall.
+    const DOOR_INTERACT_RADIUS = 0.78;
+    for (const door of RAYCAST_LEVEL.doors) {
+      if (this.doorSystem.isOpen(door.id)) continue;
+      for (const player of alivePlayers) {
+        if (isNearPoint(player.x, player.y, { x: door.x, y: door.y, radius: DOOR_INTERACT_RADIUS })) {
+          const result = this.doorSystem.attemptOpen(door, 0);
+          if (result.opened) {
+            openRaycastDoor(this.map, door);
+            this.pendingEvents.push({ type: 'event', kind: 'doorOpen', id: door.id });
+          }
+          break;
+        }
+      }
+    }
+
+    // 0c. Process level triggers for every alive player.
     // Co-op semantics: first alive player to enter a trigger zone activates it.
     // TriggerSystem enforces once:true — subsequent players passing through are
-    // no-ops. Mirrors the SP logic in RaycastScene.updateLevelState().
+    // no-ops. Passing isDoorOpen unlocks the triggers that require a door to be
+    // open first (e.g. gate-ambush requires rust-gate open).
+    const triggerPoints = alivePlayers.map((p) => ({ x: p.x, y: p.y }));
     for (const trigger of RAYCAST_LEVEL.triggers) {
-      const alivePlayers = players.filter((p) => p.alive);
-      const points = alivePlayers.map((p) => ({ x: p.x, y: p.y }));
-      const activated = this.triggerSystem.activateIfEntered(trigger, points);
+      const activated = this.triggerSystem.activateIfEntered(trigger, triggerPoints, {
+        isDoorOpen: (id) => this.doorSystem.isOpen(id),
+      });
       if (!activated) continue;
 
       // Notify the director so it enters WARNING → AMBUSH (same as SP).
@@ -230,8 +276,18 @@ export class ServerWorld {
       enemies: this.enemies.map((e) => this.toEnemyState(e)),
       projectiles: [],
       items: [],
-      doors: [],
-      level: { keysCollected: [], exitActive: false, secretsFound: 0 }
+      doors: RAYCAST_LEVEL.doors.map((door) => ({
+        id: door.id,
+        open: this.doorSystem.isOpen(door.id),
+        requiresKey: door.keyId,
+      })),
+      level: {
+        keysCollected: RAYCAST_LEVEL.keys
+          .filter((key) => this.keySystem.hasKey(key.id))
+          .map((key) => key.id),
+        exitActive: false,
+        secretsFound: 0,
+      },
     };
   }
 
