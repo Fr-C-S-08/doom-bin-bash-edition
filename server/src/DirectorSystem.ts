@@ -21,4 +21,8 @@ export class DirectorSystem {
   update(input: GameDirectorInput): GameDirectorDecision {
     return this.director.update(input);
   }
+
+  notifyZoneTrigger(triggerId: string, time: number): void {
+    this.director.notifyZoneTrigger(triggerId, time);
+  }
 }

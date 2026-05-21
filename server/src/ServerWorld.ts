@@ -10,6 +10,7 @@ import { findEnemyInCrosshair } from '../../src/game/raycast/RaycastCombatSystem
 import { castRay } from '../../src/game/raycast/RaycastMap.js';
 import { applyDamage } from '../../src/game/systems/CombatSystem.js';
 import { WEAPON_ORDER, getWeaponConfig } from '../../src/game/systems/WeaponConfig.js';
+import { TriggerSystem } from '../../src/game/systems/TriggerSystem.js';
 import { RESPAWN_COOLDOWN_MS, TICK_INTERVAL_MS } from '../../shared/constants.js';
 
 export class ServerWorld {
@@ -20,6 +21,9 @@ export class ServerWorld {
     RAYCAST_LEVEL.director.config,
     RAYCAST_LEVEL.director.spawnPoints
   );
+  // TriggerSystem tracks which level triggers have fired (once: true semantics).
+  // In co-op, the first alive player to enter a trigger zone activates it.
+  private readonly triggerSystem = new TriggerSystem();
   private serverTime = 0;
   private currentTick = 0;
   private totalKills = 0;
@@ -106,6 +110,26 @@ export class ServerWorld {
         p.y = RAYCAST_LEVEL.playerStart.y;
         p.yaw = RAYCAST_LEVEL.playerStart.angle;
         p.respawnAtTick = undefined;
+      }
+    }
+
+    // 0b. Process level triggers for every alive player.
+    // Co-op semantics: first alive player to enter a trigger zone activates it.
+    // TriggerSystem enforces once:true — subsequent players passing through are
+    // no-ops. Mirrors the SP logic in RaycastScene.updateLevelState().
+    for (const trigger of RAYCAST_LEVEL.triggers) {
+      const alivePlayers = players.filter((p) => p.alive);
+      const points = alivePlayers.map((p) => ({ x: p.x, y: p.y }));
+      const activated = this.triggerSystem.activateIfEntered(trigger, points);
+      if (!activated) continue;
+
+      // Notify the director so it enters WARNING → AMBUSH (same as SP).
+      this.director.notifyZoneTrigger(trigger.id, this.serverTime);
+
+      // Spawn the authored enemies defined on this trigger.
+      for (const spawn of trigger.spawns) {
+        const id = `trigger-${trigger.id}-${this.serverTime.toFixed(0)}-${Math.random().toString(36).slice(2, 6)}`;
+        this.enemies.push(createRaycastEnemy({ id, kind: spawn.kind, x: spawn.x, y: spawn.y }));
       }
     }
 
