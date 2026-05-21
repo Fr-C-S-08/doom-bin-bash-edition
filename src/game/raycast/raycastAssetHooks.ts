@@ -22,6 +22,7 @@ export const RAYCAST_OPTIONAL_TEXTURE_KEYS = {
   wall02: "raycast_level_wall_02",
   door01: 'raycast_level_door_01',
   door02: 'raycast_level_door_02',
+  floor01: 'raycast_level_floor_01',
 } as const;
 
 export const RAYCAST_ENEMY_TEXTURE_KEYS: Record<

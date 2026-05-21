@@ -1255,6 +1255,36 @@ export class RaycastRenderer {
       }
     }
 
+    const ceilingLineColor = this.blendColors(
+  zoneTheme.patternColor,
+  zoneTheme.signalColor,
+  0.28,
+);
+
+this.graphics.lineStyle(
+  1,
+  ceilingLineColor,
+  0.003 + groundStyle.floorBandAlpha * 0.015,
+);
+
+for (let lane = -4; lane <= 4; lane += 1) {
+  const topX = width * 0.5 + lane * width * 0.16;
+  const horizonX = width * 0.5 + lane * width * 0.045;
+  this.graphics.lineBetween(topX, 0, horizonX, horizonY - 4);
+}
+
+for (let row = 1; row <= 7; row += 1) {
+  const t = row / 8;
+  const rowY = Phaser.Math.Linear(8, horizonY - 8, t * t);
+  const rowW = Phaser.Math.Linear(width * 0.95, width * 0.22, t);
+  const rowX = width * 0.5 - rowW * 0.5;
+
+  this.graphics.fillStyle(
+    ceilingLineColor,
+    (0.035 + t * 0.045) * (0.6 + groundStyle.floorBandAlpha),
+  );
+  this.graphics.fillRect(rowX, rowY, rowW, Math.max(1, 2 - t));
+}
     for (let y = horizonY; y < height; y += 4) {
       const t = (y - horizonY) / Math.max(1, height - horizonY);
       const bandIndex = Math.floor((y - horizonY) / 4);
@@ -1406,6 +1436,88 @@ export class RaycastRenderer {
       }
     }
 
+
+const floorBaseColor = this.blendColors(
+  RAYCAST_ATMOSPHERE.floorColor,
+  zoneTheme.floorColor,
+  0.34,
+);
+
+const floorDeepColor = this.blendColors(
+  RAYCAST_ATMOSPHERE.voidColor,
+  floorBaseColor,
+  0.34,
+);
+
+const floorTextureSample = this.getWallTextureSample(
+  RAYCAST_OPTIONAL_TEXTURE_KEYS.floor01,
+);
+
+// Base oscura para matar el look de grid.
+this.graphics.fillStyle(floorDeepColor, 0.58);
+this.graphics.fillRect(0, horizonY, width, height - horizonY);
+
+// Luz central muy sutil.
+this.graphics.fillStyle(floorBaseColor, 0.36);
+this.graphics.fillTriangle(
+  width * 0.5,
+  horizonY + 10,
+  width * 0.22,
+  height,
+  width * 0.78,
+  height,
+);
+
+if (floorTextureSample) {
+  const cellW = 12;
+  const cellH = 4;
+
+  for (let y = horizonY; y < height; y += cellH) {
+    const t = (y - horizonY) / Math.max(1, height - horizonY);
+    const perspectiveT = t * t;
+
+    const rowW = Phaser.Math.Linear(width * 0.32, width * 1.18, perspectiveT);
+    const rowX = width * 0.5 - rowW * 0.5;
+    const rowEndX = rowX + rowW;
+
+    for (
+      let x = Math.max(0, rowX);
+      x < Math.min(width, rowEndX);
+      x += cellW
+    ) {
+      const u = Phaser.Math.Clamp((x - rowX) / Math.max(1, rowW), 0, 1);
+      const v = (perspectiveT * 2.4) % 1;
+
+      const rawColor = this.sampleWallTextureBilinear(
+        floorTextureSample,
+        u,
+        v,
+      );
+
+      const shadedColor = this.applyShade(rawColor, 0.68 + t * 0.18);
+      const finalColor = this.blendColors(
+      shadedColor,
+      floorDeepColor,
+      0.18 + (1 - t) * 0.12,
+    );
+
+    this.graphics.fillStyle(finalColor, 0.68 + perspectiveT * 0.16);
+      this.graphics.fillRect(x, y, cellW + 1, cellH + 1);
+    }
+  }
+}
+
+// Sombras laterales para que no se vea plano.
+this.graphics.fillStyle(RAYCAST_ATMOSPHERE.voidColor, 0.12);
+this.graphics.fillTriangle(0, horizonY, width * 0.28, height, 0, height);
+this.graphics.fillTriangle(
+  width,
+  horizonY,
+  width - width * 0.28,
+  height,
+  width,
+  height,
+);  
     this.graphics.fillStyle(
       atmosphere.corruptionTint,
       atmosphere.corruptionAlpha,
@@ -1416,12 +1528,14 @@ export class RaycastRenderer {
     this.graphics.lineStyle(
       1,
       zoneTheme.signalColor,
-      0.08 + groundStyle.floorBandAlpha,
+      0.01 + groundStyle.floorBandAlpha * 0.06,
     );
     for (let y = 18; y < height; y += 36) {
       this.graphics.lineBetween(0, y, width, y);
     }
-
+    for (let y = 18; y < height; y += 36) {
+      this.graphics.lineBetween(0, y, width, y);
+    }
     const hzLm = activeZone?.landmark;
     if (hzLm === "gate" || hzLm === "ambush" || hzLm === "reactor") {
       this.graphics.lineStyle(
