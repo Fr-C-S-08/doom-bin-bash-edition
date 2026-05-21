@@ -3,6 +3,7 @@ import { WebSocket } from 'ws';
 import { createServer, type GameServer } from '../src/index.js';
 import type { WelcomeMessage } from '../../shared/protocol.js';
 import type { AddressInfo } from 'net';
+import { RAYCAST_LEVEL_1 } from '../../src/game/raycast/RaycastLevel.js';
 
 function waitForReady(wss: GameServer['wss']): Promise<void> {
   return new Promise((resolve) => {
@@ -56,7 +57,7 @@ describe('WebSocket handshake', () => {
     expect(welcome.type).toBe('welcome');
     expect(typeof welcome.playerId).toBe('string');
     expect(welcome.playerId.length).toBeGreaterThan(0);
-    expect(welcome.mapId).toBe('raycast-level-01');
+    expect(welcome.mapId).toBe(RAYCAST_LEVEL_1.id);
     expect(welcome.config.tickRate).toBe(20);
     expect(welcome.config.respawnCooldownMs).toBe(5000);
 

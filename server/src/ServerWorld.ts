@@ -3,7 +3,17 @@ import type { SnapshotMessage, ServerEvent } from '../../shared/protocol.js';
 import { tickEnemies, findTargetPlayer } from './EnemySystem.js';
 import { DirectorSystem } from './DirectorSystem.js';
 import { cloneRaycastEnemies, createRaycastEnemy, type RaycastEnemy } from '../../src/game/raycast/RaycastEnemy.js';
-import { cloneRaycastMap, findRaycastZoneId, isNearPoint, openRaycastDoor, RAYCAST_LEVEL } from '../../src/game/raycast/RaycastLevel.js';
+import {
+  cloneRaycastMap,
+  findRaycastZoneId,
+  getRaycastExitAccess,
+  getRaycastLevelById,
+  isNearPoint,
+  openRaycastDoor,
+  RAYCAST_LEVEL,
+  type RaycastLevel,
+} from '../../src/game/raycast/RaycastLevel.js';
+import { resolveRaycastNextLevelId } from '../../src/game/raycast/RaycastEpisode.js';
 import type { RaycastMap } from '../../src/game/raycast/RaycastMap.js';
 import type { SpawnRequest } from '../../src/game/systems/GameDirector.js';
 import { findEnemyInCrosshair } from '../../src/game/raycast/RaycastCombatSystem.js';
@@ -17,43 +27,85 @@ import { RESPAWN_COOLDOWN_MS, TICK_INTERVAL_MS } from '../../shared/constants.js
 
 export class ServerWorld {
   private readonly playerStates = new Map<string, PlayerState>();
-  private readonly enemies: RaycastEnemy[] = cloneRaycastEnemies(RAYCAST_LEVEL);
-  // Cloned so that openRaycastDoor mutations are isolated to this instance.
-  private readonly map: RaycastMap = cloneRaycastMap(RAYCAST_LEVEL.map);
-  private readonly director = new DirectorSystem(
-    RAYCAST_LEVEL.director.config,
-    RAYCAST_LEVEL.director.spawnPoints
-  );
-  // TriggerSystem tracks which level triggers have fired (once: true semantics).
-  // In co-op, the first alive player to enter a trigger zone activates it.
-  private readonly triggerSystem = new TriggerSystem();
-  // KeySystem + DoorSystem mirror the client-side systems. The server is
-  // authoritative: it detects pickups and door openings by player proximity,
-  // then broadcasts the state via the snapshot.
-  private readonly keySystem = new KeySystem();
-  private readonly doorSystem = new DoorSystem(this.keySystem);
+  private readonly pendingEvents: ServerEvent[] = [];
+
+  // Level state — mutated by loadLevel() on level transitions.
+  private currentLevel!: RaycastLevel;
+  private currentLevelId = '';
+  private enemies: RaycastEnemy[] = [];
+  private map!: RaycastMap;
+  private director!: DirectorSystem;
+  private triggerSystem!: TriggerSystem;
+  private keySystem!: KeySystem;
+  private doorSystem!: DoorSystem;
+
   private serverTime = 0;
   private currentTick = 0;
   private totalKills = 0;
   private gameOverFired = false;
-  private readonly pendingEvents: ServerEvent[] = [];
-  // Initialized to 0 so timeSincePlayerDamagedMs grows naturally from game start.
-  // The director won't fire dominance escalation until dominanceNoDamageMs (9200ms)
-  // have elapsed without any player taking melee damage — identical to single-player
-  // behavior where the timer resets on each hit.
+  // When true, the campaign is finished and no further level transitions occur.
+  private sessionComplete = false;
+  // Initialized to 0; loadLevel() resets to serverTime so timeSincePlayerDamagedMs
+  // starts at 0 for each new level.
   private lastPlayerDamageAt = 0;
+
+  constructor() {
+    // serverTime is 0 at construction, so lastPlayerDamageAt will be set to 0.
+    this.loadLevel(RAYCAST_LEVEL.id);
+  }
+
+  /**
+   * Loads a level by ID, resetting all per-level state. Connected players are
+   * teleported to the new level's playerStart with full HP.
+   * serverTime is NOT reset so the director's timing remains continuous
+   * across transitions — the director won't re-enter its initial CALM window.
+   */
+  loadLevel(levelId: string): void {
+    const level = getRaycastLevelById(levelId);
+    this.currentLevel = level;
+    this.currentLevelId = level.id;
+
+    this.enemies = cloneRaycastEnemies(level);
+    // Clone so openRaycastDoor mutations are isolated to this instance.
+    this.map = cloneRaycastMap(level.map);
+    this.director = new DirectorSystem(level.director.config, level.director.spawnPoints);
+    this.keySystem = new KeySystem();
+    this.doorSystem = new DoorSystem(this.keySystem);
+    this.triggerSystem = new TriggerSystem();
+
+    this.totalKills = 0;
+    this.gameOverFired = false;
+    // Reset damage timer relative to current serverTime so the director sees
+    // 0 ms since last damage at the start of the new level.
+    this.lastPlayerDamageAt = this.serverTime;
+
+    // Teleport all connected players to the new start position with full HP.
+    for (const player of this.playerStates.values()) {
+      player.x = level.playerStart.x;
+      player.y = level.playerStart.y;
+      player.yaw = level.playerStart.angle;
+      player.hp = player.maxHp;
+      player.alive = true;
+      player.respawnAtTick = undefined;
+    }
+  }
+
+  /** Current level ID — exposed for tests and the welcome message. */
+  getCurrentLevelId(): string {
+    return this.currentLevelId;
+  }
 
   addPlayer(id: string, name: string): void {
     this.playerStates.set(id, {
       id,
       name,
-      x: RAYCAST_LEVEL.playerStart.x,
-      y: RAYCAST_LEVEL.playerStart.y,
-      yaw: RAYCAST_LEVEL.playerStart.angle,
+      x: this.currentLevel.playerStart.x,
+      y: this.currentLevel.playerStart.y,
+      yaw: this.currentLevel.playerStart.angle,
       hp: 100,
       maxHp: 100,
       weapon: 1,
-      alive: true
+      alive: true,
     });
   }
 
@@ -82,23 +134,18 @@ export class ServerWorld {
     const weaponKind = WEAPON_ORDER[kindIndex];
     const config = getWeaponConfig(weaponKind, 'raycast');
 
-    // Get wall distance for hitscan range check
     const hit = castRay(this.map, x, y, yaw, yaw);
     const wallDistance = hit.distance;
 
-    // Find enemy in crosshair using server position
     const fakePlayer = { x, y, angle: yaw };
     const enemy = findEnemyInCrosshair(
       fakePlayer,
       this.enemies.filter((e) => e.alive),
       wallDistance,
-      config.aimToleranceRadians
+      config.aimToleranceRadians,
     );
 
     if (enemy) {
-      // Server-side hitscan is instantaneous: assume all pellets in the cone
-      // connected (best-case approximation). Client's findEnemyInCrosshair
-      // already validated the target is in line-of-sight.
       applyDamage(enemy, config.damage * config.pelletCount);
     }
   }
@@ -114,9 +161,9 @@ export class ServerWorld {
       if (!p.alive && p.respawnAtTick !== undefined && this.currentTick >= p.respawnAtTick) {
         p.hp = p.maxHp;
         p.alive = true;
-        p.x = RAYCAST_LEVEL.playerStart.x;
-        p.y = RAYCAST_LEVEL.playerStart.y;
-        p.yaw = RAYCAST_LEVEL.playerStart.angle;
+        p.x = this.currentLevel.playerStart.x;
+        p.y = this.currentLevel.playerStart.y;
+        p.yaw = this.currentLevel.playerStart.angle;
         p.respawnAtTick = undefined;
       }
     }
@@ -124,10 +171,7 @@ export class ServerWorld {
     const alivePlayers = players.filter((p) => p.alive);
 
     // 0a. Detect key pickups by player proximity (server-authoritative).
-    // Mirrors RaycastScene.updateLevelState() — first alive player within the
-    // key's radius picks it up. collect() is idempotent so concurrent proximity
-    // from multiple players is safe.
-    for (const key of RAYCAST_LEVEL.keys) {
+    for (const key of this.currentLevel.keys) {
       if (this.keySystem.hasKey(key.id)) continue;
       for (const player of alivePlayers) {
         if (isNearPoint(player.x, player.y, key)) {
@@ -139,11 +183,8 @@ export class ServerWorld {
     }
 
     // 0b. Detect door openings by player proximity (server-authoritative).
-    // Uses radius 0.78 to match the client (RaycastScene.updateLevelState).
-    // Opening a door mutates the server map grid so enemy AI and spawn
-    // placement stop treating that tile as a wall.
     const DOOR_INTERACT_RADIUS = 0.78;
-    for (const door of RAYCAST_LEVEL.doors) {
+    for (const door of this.currentLevel.doors) {
       if (this.doorSystem.isOpen(door.id)) continue;
       for (const player of alivePlayers) {
         if (isNearPoint(player.x, player.y, { x: door.x, y: door.y, radius: DOOR_INTERACT_RADIUS })) {
@@ -158,24 +199,62 @@ export class ServerWorld {
     }
 
     // 0c. Process level triggers for every alive player.
-    // Co-op semantics: first alive player to enter a trigger zone activates it.
-    // TriggerSystem enforces once:true — subsequent players passing through are
-    // no-ops. Passing isDoorOpen unlocks the triggers that require a door to be
-    // open first (e.g. gate-ambush requires rust-gate open).
     const triggerPoints = alivePlayers.map((p) => ({ x: p.x, y: p.y }));
-    for (const trigger of RAYCAST_LEVEL.triggers) {
+    for (const trigger of this.currentLevel.triggers) {
       const activated = this.triggerSystem.activateIfEntered(trigger, triggerPoints, {
         isDoorOpen: (id) => this.doorSystem.isOpen(id),
       });
       if (!activated) continue;
 
-      // Notify the director so it enters WARNING → AMBUSH (same as SP).
       this.director.notifyZoneTrigger(trigger.id, this.serverTime);
 
-      // Spawn the authored enemies defined on this trigger.
       for (const spawn of trigger.spawns) {
         const id = `trigger-${trigger.id}-${this.serverTime.toFixed(0)}-${Math.random().toString(36).slice(2, 6)}`;
         this.enemies.push(createRaycastEnemy({ id, kind: spawn.kind, x: spawn.x, y: spawn.y }));
+      }
+    }
+
+    // 0d. Detect level exit — check if any alive player reached the exit and
+    // all progression conditions are met. Emits levelChange (or levelClear
+    // for the final level) and immediately loads the next level so subsequent
+    // ticks run in the new level context.
+    if (!this.sessionComplete && alivePlayers.length > 0) {
+      exitCheck: for (const exit of this.currentLevel.exits) {
+        for (const player of alivePlayers) {
+          if (!isNearPoint(player.x, player.y, exit)) continue;
+
+          const access = getRaycastExitAccess(this.currentLevel, {
+            collectedKeyIds: this.currentLevel.keys
+              .filter((k) => this.keySystem.hasKey(k.id))
+              .map((k) => k.id),
+            openDoorIds: this.currentLevel.doors
+              .filter((d) => this.doorSystem.isOpen(d.id))
+              .map((d) => d.id),
+            activatedTriggerIds: this.currentLevel.triggers
+              .filter((t) => this.triggerSystem.hasActivated(t.id))
+              .map((t) => t.id),
+            livingEnemyCount: this.enemies.filter((e) => e.alive).length,
+            // TODO: boss server-side — once the boss runs on the server, derive
+            // bossDefeated from real boss state instead of hardcoding true.
+            bossDefeated: true,
+          });
+
+          if (!access.allowed) continue;
+
+          const nextLevelId = resolveRaycastNextLevelId(this.currentLevelId);
+
+          if (nextLevelId === null) {
+            // Final level cleared — campaign complete.
+            this.pendingEvents.push({ type: 'event', kind: 'levelClear' });
+            this.sessionComplete = true;
+          } else {
+            this.pendingEvents.push({ type: 'event', kind: 'levelChange', nextLevelId });
+            // loadLevel immediately replaces this.currentLevel, so the loop
+            // would operate on the new level's data. Break out to avoid that.
+            this.loadLevel(nextLevelId);
+          }
+          break exitCheck;
+        }
       }
     }
 
@@ -199,25 +278,15 @@ export class ServerWorld {
     }
 
     // 3. Run director — possibly spawn new enemies.
-    // GameDirectorInput uses flat p1/p2 slots (not a players[] array).
-    // Strategy: sort alive players by HP ascending so p1 = most threatened.
-    // Dead players and empty slots are represented as alive=false, health=0.
     const sortedByHp = [...players].sort((a, b) => a.hp - b.hp);
     const p1 = sortedByHp[0] ?? null;
     const p2 = sortedByHp[1] ?? null;
 
-    // Proxy for currentWave: the server does not track level triggers, so we
-    // approximate wave progression via kill count (every 3 kills = +1 wave).
     const currentWave = Math.floor(this.totalKills / 3) + 1;
 
-    // activeZoneId: computed for the most-threatened alive player. Pure
-    // geometric lookup — no side effects. Gives the director +1 intensity
-    // when players are inside a named zone and activates the WATCHING state.
     const activeZoneId =
-      p1 && p1.alive ? findRaycastZoneId(RAYCAST_LEVEL, p1.x, p1.y) : null;
+      p1 && p1.alive ? findRaycastZoneId(this.currentLevel, p1.x, p1.y) : null;
 
-    // aliveEnemyKindCounts: breakdown of living enemies by archetype, used by
-    // pickPressureEnsembleKind to select synergistic enemy types in PRESSURE.
     const aliveEnemyKindCounts = this.enemies
       .filter((e) => e.alive)
       .reduce((acc, e) => {
@@ -252,17 +321,14 @@ export class ServerWorld {
     }
   }
 
-  /** Returns and clears any events accumulated during the last tick. */
   drainEvents(): ServerEvent[] {
     return this.pendingEvents.splice(0);
   }
 
-  /** Exposed for testing — returns the last server time at which any player took damage. */
   getLastPlayerDamageAt(): number {
     return this.lastPlayerDamageAt;
   }
 
-  /** Exposed for testing — returns current server time. */
   getServerTime(): number {
     return this.serverTime;
   }
@@ -276,13 +342,13 @@ export class ServerWorld {
       enemies: this.enemies.map((e) => this.toEnemyState(e)),
       projectiles: [],
       items: [],
-      doors: RAYCAST_LEVEL.doors.map((door) => ({
+      doors: this.currentLevel.doors.map((door) => ({
         id: door.id,
         open: this.doorSystem.isOpen(door.id),
         requiresKey: door.keyId,
       })),
       level: {
-        keysCollected: RAYCAST_LEVEL.keys
+        keysCollected: this.currentLevel.keys
           .filter((key) => this.keySystem.hasKey(key.id))
           .map((key) => key.id),
         exitActive: false,
@@ -311,7 +377,7 @@ export class ServerWorld {
       y: e.y,
       yaw: 0,
       hp: e.health,
-      state
+      state,
     };
   }
 }

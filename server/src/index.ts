@@ -153,7 +153,7 @@ export function createServer(port: number): GameServer {
         const welcome: WelcomeMessage = {
           type: 'welcome',
           playerId,
-          mapId: 'raycast-level-01',
+          mapId: world.getCurrentLevelId(),
           config: { tickRate: TICK_RATE_HZ, respawnCooldownMs: RESPAWN_COOLDOWN_MS },
         };
         ws.send(JSON.stringify(welcome));

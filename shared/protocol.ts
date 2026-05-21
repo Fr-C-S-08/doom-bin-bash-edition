@@ -78,7 +78,8 @@ export type ServerEvent =
   | { type: 'event'; kind: 'keyPickup'; color: string; by: string }
   | { type: 'event'; kind: 'itemPickup'; itemId: string; by: string }
   | { type: 'event'; kind: 'gameOver' }
-  | { type: 'event'; kind: 'levelClear' };
+  | { type: 'event'; kind: 'levelClear' }
+  | { type: 'event'; kind: 'levelChange'; nextLevelId: string };
 
 export interface ErrorMessage {
   type: 'error';
