@@ -108,11 +108,14 @@ export class RaycastRenderer {
   >();
   private readonly weaponSprite: Phaser.GameObjects.Image;
   private readonly preparedWeaponTextureKeys = new Set<string>();
+  private readonly preparedBillboardTextureKeys = new Set<string>();
+  private readonly billboardSpritePool: Phaser.GameObjects.Image[] = [];
   private readonly enemyProjectionScratch: EnemyProjection[] = [];
   private readonly projectileProjectionScratch: ProjectileProjection[] = [];
   private readonly billboardProjectionScratch: BillboardProjection[] = [];
   private readonly enemySpritePool: Phaser.GameObjects.Image[] = [];
   private activeEnemySpriteCount = 0;
+  private activeBillboardSpriteCount = 0;
 
   constructor(
     scene: Phaser.Scene,
@@ -755,6 +758,7 @@ export class RaycastRenderer {
     width: number,
     height: number,
   ): void {
+    this.activeBillboardSpriteCount = 0;
     const list = this.billboardProjectionScratch;
     let n = 0;
     for (let i = 0; i < billboards.length; i += 1) {
@@ -833,8 +837,10 @@ export class RaycastRenderer {
           2,
         );
       }
-      this.drawBillboardGlyph(projection, height);
+           this.drawBillboardGlyph(projection, height);
     }
+
+    this.hideUnusedBillboardSprites();
   }
 
   private weaponRecoilOffset(
@@ -3087,6 +3093,16 @@ private sampleWallTextureColor(
     const y = height * 0.5;
 
     if (projection.billboard.style === "token") {
+            if (
+        this.drawBillboardSpriteIfAvailable(
+          projection,
+          height,
+          RAYCAST_OPTIONAL_TEXTURE_KEYS.pickupToken,
+          4.2,
+        )
+      ) {
+        return;
+      }
       this.graphics.lineStyle(2, 0xffffff, 0.52);
       this.graphics.strokePoints(
         [
@@ -3171,6 +3187,16 @@ private sampleWallTextureColor(
     }
 
     if (projection.billboard.style === "secret") {
+            if (
+        this.drawBillboardSpriteIfAvailable(
+          projection,
+          height,
+          RAYCAST_OPTIONAL_TEXTURE_KEYS.pickupSecret,
+          4.4,
+        )
+      ) {
+        return;
+      }
       this.graphics.lineStyle(2, 0xffffff, 0.52);
       this.graphics.strokeCircle(projection.screenX, y, projection.size * 0.48);
       this.graphics.lineBetween(
@@ -3189,6 +3215,17 @@ private sampleWallTextureColor(
     }
 
     if (projection.billboard.style === "health") {
+      if (
+        this.drawBillboardSpriteIfAvailable(
+          projection,
+          height,
+          RAYCAST_OPTIONAL_TEXTURE_KEYS.pickupHealth,
+          4.6,
+        )
+      ) {
+        return;
+      }
+
       this.graphics.lineStyle(2, 0xffffff, 0.58);
       this.graphics.strokeRect(
         projection.screenX - projection.size * 0.42,
@@ -3222,6 +3259,75 @@ private sampleWallTextureColor(
         y + projection.size * 0.82,
       );
     }
+  }
+
+    private prepareBillboardTexture(textureKey: string): void {
+    if (this.preparedBillboardTextureKeys.has(textureKey)) return;
+
+    const texture = this.scene.textures.get(textureKey);
+    texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
+
+    this.preparedBillboardTextureKeys.add(textureKey);
+  }
+
+  private getBillboardSprite(): Phaser.GameObjects.Image {
+    const index = this.activeBillboardSpriteCount;
+    this.activeBillboardSpriteCount += 1;
+
+    let sprite = this.billboardSpritePool[index];
+
+    if (!sprite) {
+      sprite = this.scene.add.image(
+        0,
+        0,
+        RAYCAST_OPTIONAL_TEXTURE_KEYS.pickupHealth,
+      );
+      sprite.setOrigin(0.5, 0.5);
+      sprite.setVisible(false);
+      sprite.setDepth(7);
+      this.billboardSpritePool[index] = sprite;
+    }
+
+    return sprite;
+  }
+
+  private hideUnusedBillboardSprites(): void {
+    for (
+      let i = this.activeBillboardSpriteCount;
+      i < this.billboardSpritePool.length;
+      i += 1
+    ) {
+      this.billboardSpritePool[i].setVisible(false);
+    }
+  }
+
+  private drawBillboardSpriteIfAvailable(
+    projection: BillboardProjection,
+    height: number,
+    textureKey: string,
+    sizeMultiplier = 2.4,
+  ): boolean {
+    if (!raycastTextureExists(this.scene, textureKey)) return false;
+
+    this.prepareBillboardTexture(textureKey);
+
+    const sprite = this.getBillboardSprite();
+    const y = height * 0.5;
+    const displaySize = Phaser.Math.Clamp(
+      projection.size * sizeMultiplier,
+      42,
+      230,
+    );
+
+    sprite
+      .setTexture(textureKey)
+      .setVisible(true)
+      .setAlpha(Phaser.Math.Clamp(1 - projection.distance * 0.035, 0.68, 1))
+      .setPosition(projection.screenX, y)
+      .setDisplaySize(displaySize, displaySize)
+      .setDepth(7);
+
+    return true;
   }
 
   private applyShade(color: number, shade: number): number {
