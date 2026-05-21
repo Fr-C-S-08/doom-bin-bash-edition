@@ -3,7 +3,7 @@ import type { SnapshotMessage, ServerEvent } from '../../shared/protocol.js';
 import { tickEnemies, findTargetPlayer } from './EnemySystem.js';
 import { DirectorSystem } from './DirectorSystem.js';
 import { cloneRaycastEnemies, createRaycastEnemy, type RaycastEnemy } from '../../src/game/raycast/RaycastEnemy.js';
-import { RAYCAST_LEVEL } from '../../src/game/raycast/RaycastLevel.js';
+import { findRaycastZoneId, RAYCAST_LEVEL } from '../../src/game/raycast/RaycastLevel.js';
 import type { RaycastMap } from '../../src/game/raycast/RaycastMap.js';
 import type { SpawnRequest } from '../../src/game/systems/GameDirector.js';
 import { findEnemyInCrosshair } from '../../src/game/raycast/RaycastCombatSystem.js';
@@ -135,6 +135,26 @@ export class ServerWorld {
     const sortedByHp = [...players].sort((a, b) => a.hp - b.hp);
     const p1 = sortedByHp[0] ?? null;
     const p2 = sortedByHp[1] ?? null;
+
+    // Proxy for currentWave: the server does not track level triggers, so we
+    // approximate wave progression via kill count (every 3 kills = +1 wave).
+    const currentWave = Math.floor(this.totalKills / 3) + 1;
+
+    // activeZoneId: computed for the most-threatened alive player. Pure
+    // geometric lookup — no side effects. Gives the director +1 intensity
+    // when players are inside a named zone and activates the WATCHING state.
+    const activeZoneId =
+      p1 && p1.alive ? findRaycastZoneId(RAYCAST_LEVEL, p1.x, p1.y) : null;
+
+    // aliveEnemyKindCounts: breakdown of living enemies by archetype, used by
+    // pickPressureEnsembleKind to select synergistic enemy types in PRESSURE.
+    const aliveEnemyKindCounts = this.enemies
+      .filter((e) => e.alive)
+      .reduce((acc, e) => {
+        acc[e.kind] = (acc[e.kind] ?? 0) + 1;
+        return acc;
+      }, {} as Partial<Record<RaycastEnemy['kind'], number>>);
+
     const decision = this.director.update({
       elapsedTime: this.serverTime,
       totalKills: this.totalKills,
@@ -143,8 +163,10 @@ export class ServerWorld {
       p2Health: p2?.hp ?? 0,
       p1Alive: p1?.alive ?? false,
       p2Alive: p2?.alive ?? false,
-      currentWave: 1,
-      timeSincePlayerDamagedMs: this.serverTime - this.lastPlayerDamageAt
+      currentWave,
+      timeSincePlayerDamagedMs: this.serverTime - this.lastPlayerDamageAt,
+      activeZoneId,
+      aliveEnemyKindCounts,
     });
 
     if (decision.spawn) this.spawnEnemy(decision.spawn);
