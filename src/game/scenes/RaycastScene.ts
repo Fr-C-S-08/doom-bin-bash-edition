@@ -998,6 +998,7 @@ export class RaycastScene extends Phaser.Scene {
           if (!this.netState) return;
           this.netState.applySnapshot(snap);
           this.syncEnemiesFromSnapshot(snap.enemies);
+          this.syncLevelStateFromSnapshot(snap);
           const local = this.netState.getLocalPlayer();
           if (local) {
             this.playerHealth = local.hp;
@@ -4815,6 +4816,40 @@ export class RaycastScene extends Phaser.Scene {
    * does not carry variant info yet.
    * TODO: add variant field to EnemyState in shared/types.ts in a future phase.
    */
+  /**
+   * Applies server-authoritative key and door state from the snapshot.
+   * Only called in co-op (netConnected); single-player uses local systems.
+   *
+   * Keys are synced first so that doorSystem.attemptOpen() can find them
+   * when we subsequently force-open doors the server has already opened.
+   * Opening a door via this path mutates this.map (same as tryOpenDoor)
+   * but skips audio/narration — that feedback can be added later.
+   */
+  private syncLevelStateFromSnapshot(snap: SnapshotMessage): void {
+    // ── Keys ───────────────────────────────────────────────────────────────
+    for (const keyId of snap.level.keysCollected) {
+      if (this.keySystem.hasKey(keyId)) continue;
+      const key = this.currentLevel.keys.find((k) => k.id === keyId);
+      if (key) this.keySystem.collect(key);
+    }
+
+    // ── Doors ──────────────────────────────────────────────────────────────
+    // After key sync above, any key the server used to open a door is now in
+    // the local keySystem, so attemptOpen(door, 0) will succeed.
+    for (const doorState of snap.doors) {
+      if (!doorState.open || this.doorSystem.isOpen(doorState.id)) continue;
+      const door = this.currentLevel.doors.find((d) => d.id === doorState.id);
+      if (!door) continue;
+      const result = this.doorSystem.attemptOpen(door, 0);
+      if (!result.opened) continue;
+      openRaycastDoor(this.map, door);
+      // Invalidate minimap cache so the open door is reflected immediately.
+      this.mapLayoutRevision += 1;
+      this.minimapStaticCellsCacheKey = '';
+      this.minimapStaticCells = null;
+    }
+  }
+
   private syncEnemiesFromSnapshot(enemyStates: EnemyState[]): void {
     const existingById = new Map(this.enemies.map((e) => [e.id, e]));
     this.enemies = enemyStates.map((es) => {
