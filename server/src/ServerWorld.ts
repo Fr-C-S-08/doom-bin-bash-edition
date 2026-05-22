@@ -48,6 +48,8 @@ export class ServerWorld {
   // Initialized to 0; loadLevel() resets to serverTime so timeSincePlayerDamagedMs
   // starts at 0 for each new level.
   private lastPlayerDamageAt = 0;
+  // Diagnostic: throttle "exit blocked" logs to one per exit per 2 seconds.
+  private readonly exitBlockedLogAt = new Map<string, number>();
 
   constructor() {
     // serverTime is 0 at construction, so lastPlayerDamageAt will be set to 0.
@@ -61,9 +63,12 @@ export class ServerWorld {
    * across transitions — the director won't re-enter its initial CALM window.
    */
   loadLevel(levelId: string): void {
+    const previousId = this.currentLevelId || '(none)';
+    console.log(`[server] loadLevel: ${previousId} → ${levelId} (players: ${this.playerStates.size})`);
     const level = getRaycastLevelById(levelId);
     this.currentLevel = level;
     this.currentLevelId = level.id;
+    this.exitBlockedLogAt.clear();
 
     this.enemies = cloneRaycastEnemies(level);
     // Clone so openRaycastDoor mutations are isolated to this instance.
@@ -239,11 +244,34 @@ export class ServerWorld {
             bossDefeated: true,
           });
 
-          if (!access.allowed) continue;
+          if (!access.allowed) {
+            const lastLogAt = this.exitBlockedLogAt.get(exit.id) ?? -Infinity;
+            if (this.serverTime - lastLogAt >= 2000) {
+              this.exitBlockedLogAt.set(exit.id, this.serverTime);
+              const req = this.currentLevel.progression;
+              const enemiesAlive = this.enemies.filter((e) => e.alive).length;
+              console.log(
+                `[server] exit ${exit.id} bloqueado: ` +
+                  `keys=[${access.missingKeyIds?.join(',') ?? ''}] ` +
+                  `doors=[${access.missingDoorIds?.join(',') ?? ''}] ` +
+                  `triggers=[${access.missingTriggerIds?.join(',') ?? ''}] ` +
+                  `enemiesAlive=${enemiesAlive} ` +
+                  `needsCombatClear=${Boolean(req.requireCombatClear)} ` +
+                  `needsBoss=${Boolean(req.requireBossDefeated)} ` +
+                  `reason=${access.reason ?? '?'}`,
+              );
+            }
+            continue;
+          }
 
           const nextLevelId = resolveRaycastNextLevelId(this.currentLevelId);
+          console.log(
+            `[server] EXIT activado en ${this.currentLevelId} por player ${player.id} → ` +
+              `emitiendo levelChange a ${nextLevelId ?? '(none)'}`,
+          );
 
           if (nextLevelId === null) {
+            console.log(`[server] campaña completa, no hay siguiente nivel desde ${this.currentLevelId}`);
             // Final level cleared — campaign complete.
             this.pendingEvents.push({ type: 'event', kind: 'levelClear' });
             this.sessionComplete = true;

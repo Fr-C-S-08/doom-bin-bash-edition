@@ -149,11 +149,14 @@ export function createServer(port: number): GameServer {
         const name = msg.name ?? 'unknown';
         players.set(playerId, { ws, name });
         world.addPlayer(playerId, name);
-        console.log(`[server] id=${playerId} name="${name}" registered (total=${players.size})`);
+        const currentLevelId = world.getCurrentLevelId();
+        console.log(
+          `[server] id=${playerId} name="${name}" joined on level=${currentLevelId} (total=${players.size})`,
+        );
         const welcome: WelcomeMessage = {
           type: 'welcome',
           playerId,
-          mapId: world.getCurrentLevelId(),
+          mapId: currentLevelId,
           config: { tickRate: TICK_RATE_HZ, respawnCooldownMs: RESPAWN_COOLDOWN_MS },
         };
         ws.send(JSON.stringify(welcome));
