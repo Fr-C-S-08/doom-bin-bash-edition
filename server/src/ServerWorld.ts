@@ -273,9 +273,8 @@ export class ServerWorld {
               .filter((t) => this.triggerSystem.hasActivated(t.id))
               .map((t) => t.id),
             livingEnemyCount: this.enemies.filter((e) => e.alive).length,
-            // TODO: boss server-side — once the boss runs on the server, derive
-            // bossDefeated from real boss state instead of hardcoding true.
-            bossDefeated: true,
+            // Non-boss arenas: bossState is null → defeated. Boss arenas: gated on real alive flag.
+            bossDefeated: this.bossState === null || !this.bossState.alive,
           });
 
           if (!access.allowed) {
@@ -415,6 +414,13 @@ export class ServerWorld {
           .map((key) => key.id),
         exitActive: false,
         secretsFound: 0,
+        ...(this.bossState
+          ? {
+              bossHp: this.bossState.health,
+              bossMaxHp: this.bossState.maxHealth,
+              bossAlive: this.bossState.alive,
+            }
+          : {}),
       },
     };
   }
