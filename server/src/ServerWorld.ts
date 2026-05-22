@@ -4,6 +4,12 @@ import { tickEnemies, findTargetPlayer } from './EnemySystem.js';
 import { DirectorSystem } from './DirectorSystem.js';
 import { cloneRaycastEnemies, createRaycastEnemy, type RaycastEnemy } from '../../src/game/raycast/RaycastEnemy.js';
 import {
+  computeRaycastBossWeaponDamage,
+  createRaycastBossState,
+  damageRaycastBoss,
+  type RaycastBossState,
+} from '../../src/game/raycast/RaycastBoss.js';
+import {
   cloneRaycastMap,
   findRaycastZoneId,
   getRaycastExitAccess,
@@ -38,6 +44,10 @@ export class ServerWorld {
   private triggerSystem!: TriggerSystem;
   private keySystem!: KeySystem;
   private doorSystem!: DoorSystem;
+  // Authoritative boss state for arenas with a bossConfig. Null on non-boss levels.
+  // Movement/AI/volleys still run client-side at this milestone; the server only
+  // owns HP and alive — clients sync via snapshot in a follow-up commit.
+  private bossState: RaycastBossState | null = null;
 
   private serverTime = 0;
   private currentTick = 0;
@@ -83,6 +93,10 @@ export class ServerWorld {
     // Reset damage timer relative to current serverTime so the director sees
     // 0 ms since last damage at the start of the new level.
     this.lastPlayerDamageAt = this.serverTime;
+
+    this.bossState = level.bossConfig
+      ? createRaycastBossState(level.bossConfig, this.serverTime, { arenaLevelId: level.id })
+      : null;
 
     // Teleport all connected players to the new start position with full HP.
     for (const player of this.playerStates.values()) {
@@ -152,6 +166,26 @@ export class ServerWorld {
 
     if (enemy) {
       applyDamage(enemy, config.damage * config.pelletCount);
+    }
+
+    // Boss: authoritative HP server-side. Movement/AI/volleys still run on the
+    // client at this milestone — we only resolve the hitscan damage here.
+    if (this.bossState?.alive) {
+      const bossPlayer = { x, y, angle: yaw, velocity: { x: 0, y: 0 } };
+      const bossDamage = computeRaycastBossWeaponDamage(
+        this.bossState,
+        bossPlayer,
+        this.map,
+        weaponKind,
+        'raycast',
+      );
+      if (bossDamage > 0) {
+        damageRaycastBoss(this.bossState, bossDamage, this.serverTime, {
+          fromX: x,
+          fromY: y,
+          map: this.map,
+        });
+      }
     }
   }
 
