@@ -99,7 +99,14 @@ export interface RaycastBillboard {
   color: number;
   radius: number;
   label?: string;
-  style?: "token" | "gate" | "gate-open" | "secret" | "exit" | "health";
+  style?:
+  | "token"
+  | "gate"
+  | "gate-open"
+  | "secret"
+  | "exit"
+  | "health"
+  | "player";
 }
 
 /** Preallocated slots reused each frame — avoids per-enemy/projection object literals in hot paths. */
@@ -3319,6 +3326,32 @@ private sampleWallTextureColor(
     height: number,
   ): void {
     const y = height * 0.5;
+        if (projection.billboard.style === "player") {
+      if (
+        this.drawBillboardSpriteIfAvailable(
+          projection,
+          height,
+          RAYCAST_OPTIONAL_TEXTURE_KEYS.coopPlayer,
+          18,
+        )
+      ) {
+        return;
+      }
+
+      this.graphics.lineStyle(2, 0xffffff, 0.62);
+      this.graphics.strokeCircle(
+        projection.screenX,
+        y,
+        projection.size * 0.62,
+      );
+      this.graphics.lineBetween(
+        projection.screenX - projection.size * 0.32,
+        y,
+        projection.screenX + projection.size * 0.32,
+        y,
+      );
+      return;
+    }
 
     if (projection.billboard.style === "token") {
             if (

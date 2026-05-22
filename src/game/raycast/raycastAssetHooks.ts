@@ -34,6 +34,7 @@ export const RAYCAST_OPTIONAL_TEXTURE_KEYS = {
   voltArchonHurt: "raycast_boss_volt_archon_hurt",
   voltArchonDeath: "raycast_boss_volt_archon_death",
   ceiling01: 'raycast_level_ceiling_01',
+  coopPlayer: "raycast_player_coop",
 } as const;
 
 export const RAYCAST_ENEMY_TEXTURE_KEYS: Record<
@@ -107,6 +108,11 @@ const OPTIONAL_IMAGE_ASSETS = [
   key: RAYCAST_OPTIONAL_TEXTURE_KEYS.pickupSecret,
   path: "assets/raycast/pickups/secret_pickup.png",
   },
+
+  {
+  key: RAYCAST_OPTIONAL_TEXTURE_KEYS.coopPlayer,
+  path: "assets/raycast/players/heroe_skin.png",
+},
 
   //UMAMI
     // BOSS: VOLT ARCHON
