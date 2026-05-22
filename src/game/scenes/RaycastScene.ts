@@ -108,6 +108,7 @@ import {
   damageRaycastBoss,
   getRaycastBossPhaseLabel,
   getRaycastBossCrosshairTarget,
+  syncRaycastBossPhase,
   tickRaycastBossArenaTwist,
   tickRaycastBossMovement,
   tickRaycastBossVolleys,
@@ -2306,11 +2307,18 @@ export class RaycastScene extends Phaser.Scene {
         const bossDamage = Math.max(1, Math.round(baseBossDamage * this.getPlayerDamageMultiplier()));
         this.runPelletsHitHostile += bossPellets;
         this.runBossPelletsHitHostile += bossPellets;
-        const killed = damageRaycastBoss(targetBoss, bossDamage, this.time.now, {
-          fromX: this.player.x,
-          fromY: this.player.y,
-          map: this.map
-        });
+        // In co-op the server is authoritative for boss HP/alive. The shoot
+        // message was already sent to the server above (sendShoot); the boss
+        // death will arrive via snap.level.bossAlive and be mirrored by
+        // syncLevelStateFromSnapshot. Skip the local mutation so the bar
+        // does not run ahead of the server's truth.
+        const killed = this.netConnected
+          ? false
+          : damageRaycastBoss(targetBoss, bossDamage, this.time.now, {
+              fromX: this.player.x,
+              fromY: this.player.y,
+              map: this.map
+            });
         const bossCrit = !killed && bossDamage >= Math.ceil(targetBoss.maxHealth * 0.14);
         if (killed) {
           this.runScore += this.applyEventScoreGain(addRaycastBossClearScore(0));
@@ -4907,6 +4915,18 @@ export class RaycastScene extends Phaser.Scene {
       this.mapLayoutRevision += 1;
       this.minimapStaticCellsCacheKey = '';
       this.minimapStaticCells = null;
+    }
+
+    // ── Boss ───────────────────────────────────────────────────────────────
+    // Server owns HP and alive on boss arenas; mirror them into the local
+    // boss state so every player sees the same bar and the boss dies for all
+    // at the same time. Movement/AI/volleys still run locally per client.
+    const localBoss = this.bossStates[0];
+    if (localBoss && snap.level.bossHp != null) {
+      localBoss.health = snap.level.bossHp;
+      if (snap.level.bossMaxHp != null) localBoss.maxHealth = snap.level.bossMaxHp;
+      localBoss.alive = snap.level.bossAlive ?? true;
+      syncRaycastBossPhase(localBoss);
     }
   }
 
