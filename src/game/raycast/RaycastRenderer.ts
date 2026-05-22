@@ -115,6 +115,12 @@ export class RaycastRenderer {
   >();
   private readonly weaponSprite: Phaser.GameObjects.Image;
   private readonly preparedWeaponTextureKeys = new Set<string>();
+  private readonly preparedBossTextureKeys = new Set<string>();
+  private bossSprite: Phaser.GameObjects.Image | null = null;
+  private readonly previousBossSpritePositions = new Map<
+    string,
+    { x: number; y: number }
+  >();
   private readonly preparedBillboardTextureKeys = new Set<string>();
   private readonly billboardSpritePool: Phaser.GameObjects.Image[] = [];
   private readonly enemyProjectionScratch: EnemyProjection[] = [];
@@ -577,13 +583,26 @@ export class RaycastRenderer {
     time: number,
     atmosphere: RaycastAtmosphereRenderOptions,
   ): void {
-    if (!boss?.alive) return;
+        if (!boss) {
+      this.hideBossSprite();
+      return;
+    }
+
+    const showDeathSprite = !boss.alive && time < boss.hitFlashUntil + 900;
+
+    if (!boss.alive && !showDeathSprite) {
+      this.hideBossSprite();
+      return;
+    }
     const dx = boss.x - player.x;
     const dy = boss.y - player.y;
     const distance = Math.hypot(dx, dy);
     const angleToEnemy = Math.atan2(dy, dx);
     const angleDelta = normalizeAngle(angleToEnemy - player.angle);
-    if (Math.abs(angleDelta) > this.config.fovRadians * 0.58) return;
+        if (Math.abs(angleDelta) > this.config.fovRadians * 0.58) {
+      this.hideBossSprite();
+      return;
+    }
 
     const screenX =
       width * 0.5 + (angleDelta / (this.config.fovRadians * 0.5)) * width * 0.5;
@@ -593,11 +612,13 @@ export class RaycastRenderer {
       0,
       this.config.rayCount - 1,
     );
-    if (
+        if (
       correctedDistance >
       (this.depthBuffer[column] ?? Number.POSITIVE_INFINITY) + 0.08
-    )
+    ) {
+      this.hideBossSprite();
       return;
+    }
 
     const visibility = calculateEnemyVisibility(correctedDistance, atmosphere);
     const baseSize = Phaser.Math.Clamp(
@@ -612,6 +633,18 @@ export class RaycastRenderer {
     const cx = screenX;
     const cy = height * 0.5;
     const coreColor = profile.coreColor;
+        if (
+      this.drawBossSpriteIfAvailable(
+        boss,
+        cx,
+        cy,
+        size,
+        time,
+        visibility,
+      )
+    ) {
+      return;
+    }
 
     this.graphics.fillStyle(0x120618, 0.82 * visibility);
     this.graphics.fillEllipse(cx, cy + size * 0.1, size * 1.5, size * 0.42);
@@ -873,6 +906,114 @@ export class RaycastRenderer {
     return { x: eased * 8.8, y: eased * 34 };
   }
 
+
+    private hideBossSprite(): void {
+    this.bossSprite?.setVisible(false);
+  }
+
+  private prepareBossTexture(textureKey: string): void {
+    if (this.preparedBossTextureKeys.has(textureKey)) return;
+
+    const texture = this.scene.textures.get(textureKey);
+    texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
+
+    this.preparedBossTextureKeys.add(textureKey);
+  }
+
+  private getBossSprite(textureKey: string): Phaser.GameObjects.Image {
+    if (!this.bossSprite) {
+      this.bossSprite = this.scene.add.image(0, 0, textureKey);
+      this.bossSprite.setOrigin(0.5, 0.5);
+      this.bossSprite.setVisible(false);
+      this.bossSprite.setDepth(6.8);
+    }
+
+    return this.bossSprite;
+  }
+
+  private getVoltArchonTextureKey(
+    boss: RaycastBossState,
+    time: number,
+  ): string | null {
+    if (boss.behavior !== "volt-archon") return null;
+
+    if (!boss.alive) return RAYCAST_OPTIONAL_TEXTURE_KEYS.voltArchonDeath;
+
+    if (time < boss.hitFlashUntil) {
+      return RAYCAST_OPTIONAL_TEXTURE_KEYS.voltArchonHurt;
+    }
+
+    const telegraphRemaining = boss.telegraphUntil - time;
+
+    if (telegraphRemaining > 0 && telegraphRemaining <= 180) {
+      return RAYCAST_OPTIONAL_TEXTURE_KEYS.voltArchonAttack;
+    }
+
+    if (telegraphRemaining > 0) {
+      return RAYCAST_OPTIONAL_TEXTURE_KEYS.voltArchonTelegraph;
+    }
+
+    const previous = this.previousBossSpritePositions.get(boss.id);
+    const moved =
+      previous !== undefined &&
+      Math.hypot(boss.x - previous.x, boss.y - previous.y) > 0.002;
+
+    this.previousBossSpritePositions.set(boss.id, {
+      x: boss.x,
+      y: boss.y,
+    });
+
+    if (moved) {
+      return Math.floor(time / 180) % 2 === 0
+        ? RAYCAST_OPTIONAL_TEXTURE_KEYS.voltArchonWalk1
+        : RAYCAST_OPTIONAL_TEXTURE_KEYS.voltArchonWalk2;
+    }
+
+    return RAYCAST_OPTIONAL_TEXTURE_KEYS.voltArchonIdle;
+  }
+
+  private drawBossSpriteIfAvailable(
+    boss: RaycastBossState,
+    cx: number,
+    cy: number,
+    size: number,
+    time: number,
+    visibility: number,
+  ): boolean {
+    const textureKey = this.getVoltArchonTextureKey(boss, time);
+
+    if (!textureKey) return false;
+    if (!raycastTextureExists(this.scene, textureKey)) return false;
+
+    this.prepareBossTexture(textureKey);
+
+    const sprite = this.getBossSprite(textureKey);
+    sprite.setTexture(textureKey);
+
+    const frame = this.scene.textures.getFrame(textureKey);
+    const aspect = frame ? frame.width / Math.max(1, frame.height) : 0.62;
+    const displayHeight = Phaser.Math.Clamp(size * 1.82, 96, 430);
+    const displayWidth = displayHeight * aspect;
+
+    const phasePulse =
+      boss.phase === 3 ? 1 + Math.sin(time / 72) * 0.035 : 1;
+
+    sprite
+      .setVisible(true)
+      .setPosition(cx, cy + size * 0.04)
+      .setDisplaySize(displayWidth * phasePulse, displayHeight * phasePulse)
+      .setAlpha(Phaser.Math.Clamp(visibility, 0.38, 1))
+      .setDepth(6.8);
+
+    if (boss.phase === 3) {
+      sprite.setTint(0xffd6c0);
+    } else {
+      sprite.clearTint();
+    }
+
+    return true;
+  }
+  
   private prepareWeaponTexture(textureKey: string): void {
     if (this.preparedWeaponTextureKeys.has(textureKey)) return;
 

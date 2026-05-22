@@ -26,6 +26,13 @@ export const RAYCAST_OPTIONAL_TEXTURE_KEYS = {
   pickupHealth: "raycast_pickup_health",
   pickupToken: "raycast_pickup_token",
   pickupSecret: "raycast_pickup_secret",
+  voltArchonIdle: "raycast_boss_volt_archon_idle",
+  voltArchonWalk1: "raycast_boss_volt_archon_walk_1",
+  voltArchonWalk2: "raycast_boss_volt_archon_walk_2",
+  voltArchonTelegraph: "raycast_boss_volt_archon_telegraph",
+  voltArchonAttack: "raycast_boss_volt_archon_attack",
+  voltArchonHurt: "raycast_boss_volt_archon_hurt",
+  voltArchonDeath: "raycast_boss_volt_archon_death",
   ceiling01: 'raycast_level_ceiling_01',
 } as const;
 
@@ -99,6 +106,37 @@ const OPTIONAL_IMAGE_ASSETS = [
   {
   key: RAYCAST_OPTIONAL_TEXTURE_KEYS.pickupSecret,
   path: "assets/raycast/pickups/secret_pickup.png",
+  },
+
+  //UMAMI
+    // BOSS: VOLT ARCHON
+  {
+    key: RAYCAST_OPTIONAL_TEXTURE_KEYS.voltArchonIdle,
+    path: "assets/raycast/bosses/volt_archon/volt_archon_idle.png",
+  },
+  {
+    key: RAYCAST_OPTIONAL_TEXTURE_KEYS.voltArchonWalk1,
+    path: "assets/raycast/bosses/volt_archon/volt_archon_walk_1.png",
+  },
+  {
+    key: RAYCAST_OPTIONAL_TEXTURE_KEYS.voltArchonWalk2,
+    path: "assets/raycast/bosses/volt_archon/volt_archon_walk_2.png",
+  },
+  {
+    key: RAYCAST_OPTIONAL_TEXTURE_KEYS.voltArchonTelegraph,
+    path: "assets/raycast/bosses/volt_archon/volt_archon_telegraph.png",
+  },
+  {
+    key: RAYCAST_OPTIONAL_TEXTURE_KEYS.voltArchonAttack,
+    path: "assets/raycast/bosses/volt_archon/volt_archon_attack.png",
+  },
+  {
+    key: RAYCAST_OPTIONAL_TEXTURE_KEYS.voltArchonHurt,
+    path: "assets/raycast/bosses/volt_archon/volt_archon_hurt.png",
+  },
+  {
+    key: RAYCAST_OPTIONAL_TEXTURE_KEYS.voltArchonDeath,
+    path: "assets/raycast/bosses/volt_archon/volt_archon_death.png",
   },
   //TECHO
   {
