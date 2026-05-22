@@ -6,6 +6,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY server ./server
+COPY shared ./shared
 
 EXPOSE 3001
 

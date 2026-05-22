@@ -46,6 +46,7 @@ services:
       - '3001:3001'
     volumes:
       - ./server:/app/server:ro
+      - ./shared:/app/shared:ro
       - ./package.json:/app/package.json:ro
       - ./package-lock.json:/app/package-lock.json:ro
     depends_on:
