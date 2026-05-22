@@ -3450,6 +3450,11 @@ export class RaycastScene extends Phaser.Scene {
 
     this.currentLevel.exits.forEach((exit) => {
       if (this.levelComplete) return;
+      // In co-op, the server is authoritative for level transitions (Model B:
+      // any player reaching the exit advances everyone). Detecting the exit
+      // locally would set levelComplete = true, freeze the update loop, and
+      // stop sendInput — the server would never see the player at the exit.
+      if (this.netConnected) return;
       if (!isNearPoint(this.player.x, this.player.y, exit)) return;
       const exitAccess = getRaycastExitAccess(this.currentLevel, {
         collectedKeyIds: this.currentLevel.keys.filter((key) => this.keySystem.hasKey(key.id)).map((key) => key.id),
