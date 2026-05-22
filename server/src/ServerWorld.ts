@@ -415,6 +415,17 @@ export class ServerWorld {
     return this.pendingEvents.splice(0);
   }
 
+  /**
+   * DEBUG: jump all connected players to the given level. Mirrors the exit-detection
+   * flow (push levelChange event, then loadLevel) so the existing client handler
+   * transitions everyone in sync. Remove or gate before shipping.
+   */
+  debugJumpToLevel(levelId: string): void {
+    console.log(`[server] DEBUG debugJumpToLevel → ${levelId}`);
+    this.pendingEvents.push({ type: 'event', kind: 'levelChange', nextLevelId: levelId });
+    this.loadLevel(levelId);
+  }
+
   getLastPlayerDamageAt(): number {
     return this.lastPlayerDamageAt;
   }

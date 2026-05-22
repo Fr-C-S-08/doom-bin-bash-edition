@@ -172,6 +172,15 @@ export function createServer(port: number): GameServer {
         world.handleShoot(playerId, msg.x, msg.y, msg.yaw, msg.weapon);
         return;
       }
+
+      // DEBUG: client-requested level jump (testing shortcut). Reuses the
+      // standard levelChange broadcast so every client transitions together.
+      // Remove or gate before shipping.
+      if (msg.type === 'debugJumpToLevel') {
+        console.log(`[server] DEBUG jump requested by id=${playerId} → ${msg.levelId}`);
+        world.debugJumpToLevel(msg.levelId);
+        return;
+      }
     });
 
     ws.on('close', () => {

@@ -36,12 +36,22 @@ export interface SwitchWeaponMessage {
   weapon: number;
 }
 
+// DEBUG: client-driven jump to a specific level for testing co-op flows
+// (e.g. straight to the boss arena without playing through every level).
+// Server broadcasts a levelChange event so every client transitions together.
+// Remove or gate behind a flag before shipping.
+export interface DebugJumpToLevelMessage {
+  type: 'debugJumpToLevel';
+  levelId: string;
+}
+
 export type ClientToServerMessage =
   | HelloMessage
   | InputMessage
   | ShootMessage
   | InteractMessage
-  | SwitchWeaponMessage;
+  | SwitchWeaponMessage
+  | DebugJumpToLevelMessage;
 
 // ---------------------------------------------------------------------------
 // Server → Client

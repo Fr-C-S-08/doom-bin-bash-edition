@@ -777,8 +777,17 @@ export class RaycastScene extends Phaser.Scene {
 
   private jumpToBossArena(slot: RaycastBossShortcutSlot): void {
     if (!this.isRaycastSceneActive()) return;
+    const levelId = getRaycastBossLevelId(slot);
+    // DEBUG: in co-op, route the jump through the server so every client
+    // transitions together via the existing levelChange handler (which also
+    // preserves the live WebSocket via the registry hand-off).
+    // Remove or gate before shipping.
+    if (this.netConnected && this.netClient) {
+      this.netClient.send({ type: 'debugJumpToLevel', levelId });
+      return;
+    }
     this.scene.restart({
-      levelId: getRaycastBossLevelId(slot),
+      levelId,
       difficultyId: this.difficultyId,
       carryScore: 0,
       carryCampaignMetrics: createEmptyCampaignMetrics(),
