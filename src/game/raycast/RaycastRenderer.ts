@@ -115,11 +115,15 @@ export class RaycastRenderer {
   >();
   private readonly weaponSprite: Phaser.GameObjects.Image;
   private readonly preparedWeaponTextureKeys = new Set<string>();
+  private readonly preparedBillboardTextureKeys = new Set<string>();
+  private readonly billboardSpritePool: Phaser.GameObjects.Image[] = [];
   private readonly enemyProjectionScratch: EnemyProjection[] = [];
   private readonly projectileProjectionScratch: ProjectileProjection[] = [];
   private readonly billboardProjectionScratch: BillboardProjection[] = [];
   private readonly enemySpritePool: Phaser.GameObjects.Image[] = [];
   private activeEnemySpriteCount = 0;
+  private activeBillboardSpriteCount = 0;
+
   constructor(
     scene: Phaser.Scene,
     private readonly map: RaycastMap,
@@ -769,6 +773,7 @@ export class RaycastRenderer {
     width: number,
     height: number,
   ): void {
+    this.activeBillboardSpriteCount = 0;
     const list = this.billboardProjectionScratch;
     let n = 0;
     for (let i = 0; i < billboards.length; i += 1) {
@@ -847,8 +852,10 @@ export class RaycastRenderer {
           2,
         );
       }
-      this.drawBillboardGlyph(projection, height);
+           this.drawBillboardGlyph(projection, height);
     }
+
+    this.hideUnusedBillboardSprites();
   }
 
   private weaponRecoilOffset(
@@ -1298,6 +1305,51 @@ export class RaycastRenderer {
       }
     }
 
+ const ceilingVeilColor = this.blendColors(
+  RAYCAST_ATMOSPHERE.voidColor,
+  zoneTheme.ceilingColor,
+  0.18,
+);
+
+const ceilingRibColor = this.blendColors(
+  zoneTheme.patternColor,
+  RAYCAST_ATMOSPHERE.voidColor,
+  0.72,
+);
+
+// Techo oscuro y atmosférico.
+// No usa textura visible porque en screen-space se siente pegada a la cámara.
+this.graphics.fillStyle(ceilingVeilColor, 0.58);
+this.graphics.fillRect(0, 0, width, horizonY);
+
+// Bandas muy sutiles, solo para que no se vea totalmente plano.
+for (let row = 1; row <= 5; row += 1) {
+  const t = row / 6;
+  const y = Phaser.Math.Linear(18, horizonY - 18, t * t);
+  const rowW = Phaser.Math.Linear(width * 0.96, width * 0.46, t);
+  const rowX = width * 0.5 - rowW * 0.5;
+
+  this.graphics.fillStyle(
+    ceilingRibColor,
+    0.018 + t * 0.022,
+  );
+  this.graphics.fillRect(rowX, y, rowW, 2);
+}
+
+// Oscurecimiento superior y lateral para mantener el look Doom 64.
+this.graphics.fillStyle(RAYCAST_ATMOSPHERE.voidColor, 0.18);
+this.graphics.fillRect(0, 0, width, horizonY * 0.18);
+
+this.graphics.fillStyle(RAYCAST_ATMOSPHERE.voidColor, 0.12);
+this.graphics.fillTriangle(0, 0, width * 0.22, horizonY, 0, horizonY);
+this.graphics.fillTriangle(
+  width,
+  0,
+  width - width * 0.22,
+  horizonY,
+  width,
+  horizonY,
+);
     for (let y = horizonY; y < height; y += 4) {
       const t = (y - horizonY) / Math.max(1, height - horizonY);
       const bandIndex = Math.floor((y - horizonY) / 4);
@@ -1449,6 +1501,88 @@ export class RaycastRenderer {
       }
     }
 
+
+const floorBaseColor = this.blendColors(
+  RAYCAST_ATMOSPHERE.floorColor,
+  zoneTheme.floorColor,
+  0.34,
+);
+
+const floorDeepColor = this.blendColors(
+  RAYCAST_ATMOSPHERE.voidColor,
+  floorBaseColor,
+  0.34,
+);
+
+const floorTextureSample = this.getWallTextureSample(
+  RAYCAST_OPTIONAL_TEXTURE_KEYS.floor01,
+);
+
+// Base oscura para matar el look de grid.
+this.graphics.fillStyle(floorDeepColor, 0.58);
+this.graphics.fillRect(0, horizonY, width, height - horizonY);
+
+// Luz central muy sutil.
+this.graphics.fillStyle(floorBaseColor, 0.36);
+this.graphics.fillTriangle(
+  width * 0.5,
+  horizonY + 10,
+  width * 0.22,
+  height,
+  width * 0.78,
+  height,
+);
+
+if (floorTextureSample) {
+  const cellW = 12;
+  const cellH = 4;
+
+  for (let y = horizonY; y < height; y += cellH) {
+    const t = (y - horizonY) / Math.max(1, height - horizonY);
+    const perspectiveT = t * t;
+
+    const rowW = Phaser.Math.Linear(width * 0.32, width * 1.18, perspectiveT);
+    const rowX = width * 0.5 - rowW * 0.5;
+    const rowEndX = rowX + rowW;
+
+    for (
+      let x = Math.max(0, rowX);
+      x < Math.min(width, rowEndX);
+      x += cellW
+    ) {
+      const u = Phaser.Math.Clamp((x - rowX) / Math.max(1, rowW), 0, 1);
+      const v = (perspectiveT * 2.4) % 1;
+
+      const rawColor = this.sampleWallTextureBilinear(
+        floorTextureSample,
+        u,
+        v,
+      );
+
+      const shadedColor = this.applyShade(rawColor, 0.68 + t * 0.18);
+      const finalColor = this.blendColors(
+      shadedColor,
+      floorDeepColor,
+      0.18 + (1 - t) * 0.12,
+    );
+
+    this.graphics.fillStyle(finalColor, 0.68 + perspectiveT * 0.16);
+      this.graphics.fillRect(x, y, cellW + 1, cellH + 1);
+    }
+  }
+}
+
+// Sombras laterales para que no se vea plano.
+this.graphics.fillStyle(RAYCAST_ATMOSPHERE.voidColor, 0.12);
+this.graphics.fillTriangle(0, horizonY, width * 0.28, height, 0, height);
+this.graphics.fillTriangle(
+  width,
+  horizonY,
+  width - width * 0.28,
+  height,
+  width,
+  height,
+);  
     this.graphics.fillStyle(
       atmosphere.corruptionTint,
       atmosphere.corruptionAlpha,
@@ -1459,12 +1593,14 @@ export class RaycastRenderer {
     this.graphics.lineStyle(
       1,
       zoneTheme.signalColor,
-      0.08 + groundStyle.floorBandAlpha,
+      0.01 + groundStyle.floorBandAlpha * 0.06,
     );
     for (let y = 18; y < height; y += 36) {
       this.graphics.lineBetween(0, y, width, y);
     }
-
+    for (let y = 18; y < height; y += 36) {
+      this.graphics.lineBetween(0, y, width, y);
+    }
     const hzLm = activeZone?.landmark;
     if (hzLm === "gate" || hzLm === "ambush" || hzLm === "reactor") {
       this.graphics.lineStyle(
@@ -3044,6 +3180,16 @@ private sampleWallTextureColor(
     const y = height * 0.5;
 
     if (projection.billboard.style === "token") {
+            if (
+        this.drawBillboardSpriteIfAvailable(
+          projection,
+          height,
+          RAYCAST_OPTIONAL_TEXTURE_KEYS.pickupToken,
+          4.2,
+        )
+      ) {
+        return;
+      }
       this.graphics.lineStyle(2, 0xffffff, 0.52);
       this.graphics.strokePoints(
         [
@@ -3128,6 +3274,16 @@ private sampleWallTextureColor(
     }
 
     if (projection.billboard.style === "secret") {
+            if (
+        this.drawBillboardSpriteIfAvailable(
+          projection,
+          height,
+          RAYCAST_OPTIONAL_TEXTURE_KEYS.pickupSecret,
+          4.4,
+        )
+      ) {
+        return;
+      }
       this.graphics.lineStyle(2, 0xffffff, 0.52);
       this.graphics.strokeCircle(projection.screenX, y, projection.size * 0.48);
       this.graphics.lineBetween(
@@ -3146,6 +3302,17 @@ private sampleWallTextureColor(
     }
 
     if (projection.billboard.style === "health") {
+      if (
+        this.drawBillboardSpriteIfAvailable(
+          projection,
+          height,
+          RAYCAST_OPTIONAL_TEXTURE_KEYS.pickupHealth,
+          4.6,
+        )
+      ) {
+        return;
+      }
+
       this.graphics.lineStyle(2, 0xffffff, 0.58);
       this.graphics.strokeRect(
         projection.screenX - projection.size * 0.42,
@@ -3179,6 +3346,75 @@ private sampleWallTextureColor(
         y + projection.size * 0.82,
       );
     }
+  }
+
+    private prepareBillboardTexture(textureKey: string): void {
+    if (this.preparedBillboardTextureKeys.has(textureKey)) return;
+
+    const texture = this.scene.textures.get(textureKey);
+    texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
+
+    this.preparedBillboardTextureKeys.add(textureKey);
+  }
+
+  private getBillboardSprite(): Phaser.GameObjects.Image {
+    const index = this.activeBillboardSpriteCount;
+    this.activeBillboardSpriteCount += 1;
+
+    let sprite = this.billboardSpritePool[index];
+
+    if (!sprite) {
+      sprite = this.scene.add.image(
+        0,
+        0,
+        RAYCAST_OPTIONAL_TEXTURE_KEYS.pickupHealth,
+      );
+      sprite.setOrigin(0.5, 0.5);
+      sprite.setVisible(false);
+      sprite.setDepth(7);
+      this.billboardSpritePool[index] = sprite;
+    }
+
+    return sprite;
+  }
+
+  private hideUnusedBillboardSprites(): void {
+    for (
+      let i = this.activeBillboardSpriteCount;
+      i < this.billboardSpritePool.length;
+      i += 1
+    ) {
+      this.billboardSpritePool[i].setVisible(false);
+    }
+  }
+
+  private drawBillboardSpriteIfAvailable(
+    projection: BillboardProjection,
+    height: number,
+    textureKey: string,
+    sizeMultiplier = 2.4,
+  ): boolean {
+    if (!raycastTextureExists(this.scene, textureKey)) return false;
+
+    this.prepareBillboardTexture(textureKey);
+
+    const sprite = this.getBillboardSprite();
+    const y = height * 0.5;
+    const displaySize = Phaser.Math.Clamp(
+      projection.size * sizeMultiplier,
+      42,
+      230,
+    );
+
+    sprite
+      .setTexture(textureKey)
+      .setVisible(true)
+      .setAlpha(Phaser.Math.Clamp(1 - projection.distance * 0.035, 0.68, 1))
+      .setPosition(projection.screenX, y)
+      .setDisplaySize(displaySize, displaySize)
+      .setDepth(7);
+
+    return true;
   }
 
   private applyShade(color: number, shade: number): number {
