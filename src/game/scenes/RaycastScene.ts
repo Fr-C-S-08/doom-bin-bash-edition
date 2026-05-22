@@ -112,6 +112,7 @@ import {
   tickRaycastBossArenaTwist,
   tickRaycastBossMovement,
   tickRaycastBossVolleys,
+  type RaycastBossPlayerContext,
   type RaycastBossState
 } from '../raycast/RaycastBoss';
 import {
@@ -494,6 +495,9 @@ export class RaycastScene extends Phaser.Scene {
   private netTransitioning = false;
   private netServerUrl: string | null = null;
   private netPlayerName: string | null = null;
+  // Co-op: player id the server's boss is currently aiming at. Used to point
+  // local volleys at the same target the server picked (visible rotation).
+  private coopBossTargetId: string | null = null;
   private minimapFrameCounter = 0;
   private readonly minimapKeyIdScratch: string[] = [];
   private readonly minimapDoorIdScratch: string[] = [];
@@ -3190,14 +3194,7 @@ export class RaycastScene extends Phaser.Scene {
   private updateEnemies(delta: number): void {
     const liveBosses = this.getLiveBosses();
     this.trySpawnBossAdds(liveBosses);
-    const bossPlayerCtx = {
-      x: this.player.x,
-      y: this.player.y,
-      alive: this.playerAlive,
-      stationaryMs: this.playerStationaryMs,
-      vx: this.player.velocity.x,
-      vy: this.player.velocity.y
-    };
+    const bossPlayerCtx = this.buildBossPlayerCtx();
     for (const boss of liveBosses) {
       // In co-op the server drives boss movement and ships boss.x/y in the
       // snapshot (syncLevelStateFromSnapshot mirrors it). Running movement
@@ -4927,6 +4924,36 @@ export class RaycastScene extends Phaser.Scene {
    * Opening a door via this path mutates this.map (same as tryOpenDoor)
    * but skips audio/narration — that feedback can be added later.
    */
+  /**
+   * Build the player context the local boss uses for volleys (and, in
+   * single-player, movement too). In co-op aims at the server-selected
+   * target so all clients converge on the same victim — visible rotation.
+   * Remote-player velocity/stationaryMs are not tracked client-side; we
+   * pass zeros (matches the server's movement choice and only degrades
+   * volley pattern selection slightly).
+   */
+  private buildBossPlayerCtx(): RaycastBossPlayerContext {
+    if (this.netConnected && this.netState && this.coopBossTargetId !== null) {
+      const targetId = this.coopBossTargetId;
+      if (targetId !== this.netState.localPlayerId) {
+        const remote = this.netState.getPlayerById(targetId);
+        if (remote) {
+          return { x: remote.x, y: remote.y, alive: remote.alive, vx: 0, vy: 0 };
+        }
+        // Target id known but player not in latest snapshot — fall through
+        // to local player as a safe default.
+      }
+    }
+    return {
+      x: this.player.x,
+      y: this.player.y,
+      alive: this.playerAlive,
+      stationaryMs: this.playerStationaryMs,
+      vx: this.player.velocity.x,
+      vy: this.player.velocity.y,
+    };
+  }
+
   private syncLevelStateFromSnapshot(snap: SnapshotMessage): void {
     // ── Keys ───────────────────────────────────────────────────────────────
     for (const keyId of snap.level.keysCollected) {
@@ -4964,6 +4991,11 @@ export class RaycastScene extends Phaser.Scene {
       if (snap.level.bossY != null) localBoss.y = snap.level.bossY;
       syncRaycastBossPhase(localBoss);
     }
+
+    // Track the server's chosen boss target so local volleys aim at the
+    // same player the server's movement is rotating to. Falls back to null
+    // outside boss arenas or when no target is selected yet.
+    this.coopBossTargetId = snap.level.bossTargetId ?? null;
   }
 
   private syncEnemiesFromSnapshot(enemyStates: EnemyState[]): void {

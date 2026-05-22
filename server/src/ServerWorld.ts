@@ -450,8 +450,13 @@ export class ServerWorld {
    * target is no longer alive/connected.
    */
   private updateBossTarget(alivePlayers: PlayerState[]): void {
+    const prevTargetId = this.bossTargetPlayerId;
     if (alivePlayers.length === 0) {
       this.bossTargetPlayerId = null;
+      if (prevTargetId !== null) {
+        // DEBUG: temporary diagnostic for boss target rotation. Remove before shipping.
+        console.log(`[server] boss target → null (alive: 0)`);
+      }
       return;
     }
     const currentIdx =
@@ -464,6 +469,10 @@ export class ServerWorld {
       const nextIdx = targetLost ? 0 : (currentIdx + 1) % alivePlayers.length;
       this.bossTargetPlayerId = alivePlayers[nextIdx].id;
       this.bossTargetSwitchAt = this.serverTime + BOSS_TARGET_SWITCH_INTERVAL_MS;
+    }
+    if (this.bossTargetPlayerId !== prevTargetId) {
+      // DEBUG: temporary diagnostic for boss target rotation. Remove before shipping.
+      console.log(`[server] boss target → ${this.bossTargetPlayerId} (alive: ${alivePlayers.length})`);
     }
   }
 
@@ -494,6 +503,7 @@ export class ServerWorld {
               bossAlive: this.bossState.alive,
               bossX: this.bossState.x,
               bossY: this.bossState.y,
+              ...(this.bossTargetPlayerId !== null ? { bossTargetId: this.bossTargetPlayerId } : {}),
             }
           : {}),
       },

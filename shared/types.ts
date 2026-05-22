@@ -55,4 +55,8 @@ export interface LevelState {
   bossAlive?: boolean;
   bossX?: number;
   bossY?: number;
+  // Player id the boss is currently chasing/attacking. Clients use this to
+  // aim their local volleys at the same target the server picked, so the
+  // rotation is visible to everyone (not just the boss's movement).
+  bossTargetId?: string;
 }

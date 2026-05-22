@@ -18,4 +18,8 @@ export class NetState {
     if (!this.lastSnapshot || !this.localPlayerId) return null;
     return this.lastSnapshot.players.find((p) => p.id === this.localPlayerId) ?? null;
   }
+
+  getPlayerById(id: string): PlayerState | null {
+    return this.lastSnapshot?.players.find((p) => p.id === id) ?? null;
+  }
 }
