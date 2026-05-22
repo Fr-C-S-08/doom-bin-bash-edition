@@ -208,7 +208,8 @@ export function createServer(port: number): GameServer {
       wss.close((wsErr) => {
         httpServer.close((httpErr) => {
           const err = wsErr ?? httpErr;
-          err ? reject(err) : resolve();
+          if (err) reject(err);
+          else resolve();
         });
       });
     });
