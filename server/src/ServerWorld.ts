@@ -481,6 +481,8 @@ export class ServerWorld {
               bossHp: this.bossState.health,
               bossMaxHp: this.bossState.maxHealth,
               bossAlive: this.bossState.alive,
+              bossX: this.bossState.x,
+              bossY: this.bossState.y,
             }
           : {}),
       },

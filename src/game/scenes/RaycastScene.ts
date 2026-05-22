@@ -3170,7 +3170,12 @@ export class RaycastScene extends Phaser.Scene {
       vy: this.player.velocity.y
     };
     for (const boss of liveBosses) {
-      tickRaycastBossMovement(boss, this.map, bossPlayerCtx, delta, this.time.now);
+      // In co-op the server drives boss movement and ships boss.x/y in the
+      // snapshot (syncLevelStateFromSnapshot mirrors it). Running movement
+      // locally would race the snapshot and cause jitter.
+      if (!this.netConnected) {
+        tickRaycastBossMovement(boss, this.map, bossPlayerCtx, delta, this.time.now);
+      }
       const bossHud = getRaycastBossHudLines(boss.displayName);
       if (isBossDesperation(boss) && !boss.desperationAnnounced) {
         boss.desperationAnnounced = true;
@@ -4926,6 +4931,8 @@ export class RaycastScene extends Phaser.Scene {
       localBoss.health = snap.level.bossHp;
       if (snap.level.bossMaxHp != null) localBoss.maxHealth = snap.level.bossMaxHp;
       localBoss.alive = snap.level.bossAlive ?? true;
+      if (snap.level.bossX != null) localBoss.x = snap.level.bossX;
+      if (snap.level.bossY != null) localBoss.y = snap.level.bossY;
       syncRaycastBossPhase(localBoss);
     }
   }

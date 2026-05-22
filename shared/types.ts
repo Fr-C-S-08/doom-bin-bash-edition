@@ -48,9 +48,11 @@ export interface LevelState {
   keysCollected: string[];
   exitActive: boolean;
   secretsFound: number;
-  // Boss HP mirror for co-op: present only on boss arenas (e.g. volt-archon-pit).
+  // Boss state mirror for co-op: present only on boss arenas (e.g. volt-archon-pit).
   // Server owns the authoritative values; clients overwrite local boss state from these.
   bossHp?: number;
   bossMaxHp?: number;
   bossAlive?: boolean;
+  bossX?: number;
+  bossY?: number;
 }
