@@ -581,6 +581,10 @@ export class RaycastScene extends Phaser.Scene {
   private blackoutPulseUntil = 0;
   private flashBlindUntil = 0;
   private lastDevShortcutAt = 0;
+  // DEBUG: throttle window so a single keypress that fires both keydown and
+  // keydown-FOUR/FIVE/SIX handlers only sends one debugJumpToLevel message.
+  // Remove or gate before shipping.
+  private lastDebugJumpRequestAt = 0;
   private nextBossAddSpawnAt = 0;
 
   private readonly handleExitToMenu = (): void => {
@@ -745,6 +749,9 @@ export class RaycastScene extends Phaser.Scene {
 
   private handleDevJumpToLevel(levelId: string, label: string): void {
     if (this.gamePaused || !this.isRaycastSceneActive()) return;
+    // DEBUG: in co-op, route through the server so the local scene.restart
+    // below does not kill the WebSocket. Remove or gate before shipping.
+    if (this.requestDebugJumpToLevel(levelId)) return;
     this.setCombatMessage(`SALTO // ${label.toUpperCase()}`, 2000);
     this.scene.restart({
       levelId,
@@ -754,6 +761,24 @@ export class RaycastScene extends Phaser.Scene {
       rewardTier: this.rewardTier,
       runModifierId: this.runModifier?.id ?? null
     });
+  }
+
+  /**
+   * DEBUG: single entry point for both debug-jump handlers (jumpToBossArena
+   * and handleDevJumpToLevel). In co-op, sends one debugJumpToLevel message
+   * to the server and returns true so the caller skips its local
+   * scene.restart (which would kill the WebSocket). Returns false in
+   * single-player so the caller handles the restart itself. Throttles
+   * duplicate requests within 200ms — when a key press triggers both
+   * keydown and keydown-FOUR/FIVE/SIX handlers in the same frame, only the
+   * first send goes out. Remove or gate before shipping.
+   */
+  private requestDebugJumpToLevel(levelId: string): boolean {
+    if (!this.netConnected || !this.netClient) return false;
+    if (this.time.now - this.lastDebugJumpRequestAt < 200) return true;
+    this.lastDebugJumpRequestAt = this.time.now;
+    this.netClient.send({ type: 'debugJumpToLevel', levelId });
+    return true;
   }
 
   private readonly handleDevBossShortcut = (event: KeyboardEvent): void => {
@@ -778,14 +803,9 @@ export class RaycastScene extends Phaser.Scene {
   private jumpToBossArena(slot: RaycastBossShortcutSlot): void {
     if (!this.isRaycastSceneActive()) return;
     const levelId = getRaycastBossLevelId(slot);
-    // DEBUG: in co-op, route the jump through the server so every client
-    // transitions together via the existing levelChange handler (which also
-    // preserves the live WebSocket via the registry hand-off).
-    // Remove or gate before shipping.
-    if (this.netConnected && this.netClient) {
-      this.netClient.send({ type: 'debugJumpToLevel', levelId });
-      return;
-    }
+    // DEBUG: in co-op, ask the server to jump everyone (preserves the
+    // live WebSocket). Remove or gate before shipping.
+    if (this.requestDebugJumpToLevel(levelId)) return;
     this.scene.restart({
       levelId,
       difficultyId: this.difficultyId,
