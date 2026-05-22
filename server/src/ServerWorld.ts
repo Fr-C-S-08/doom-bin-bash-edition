@@ -7,8 +7,12 @@ import {
   computeRaycastBossWeaponDamage,
   createRaycastBossState,
   damageRaycastBoss,
+  tickRaycastBossMovement,
   type RaycastBossState,
 } from '../../src/game/raycast/RaycastBoss.js';
+
+/** How often (ms) the boss re-picks its movement target in co-op. */
+const BOSS_TARGET_SWITCH_INTERVAL_MS = 4500;
 import {
   cloneRaycastMap,
   findRaycastZoneId,
@@ -45,9 +49,12 @@ export class ServerWorld {
   private keySystem!: KeySystem;
   private doorSystem!: DoorSystem;
   // Authoritative boss state for arenas with a bossConfig. Null on non-boss levels.
-  // Movement/AI/volleys still run client-side at this milestone; the server only
-  // owns HP and alive — clients sync via snapshot in a follow-up commit.
+  // Movement now runs server-side too (target rotates between players by time);
+  // volleys still run client-side until Paso B.
   private bossState: RaycastBossState | null = null;
+  // Current movement target id and when to re-pick. Reset on loadLevel.
+  private bossTargetPlayerId: string | null = null;
+  private bossTargetSwitchAt = 0;
 
   private serverTime = 0;
   private currentTick = 0;
@@ -97,6 +104,8 @@ export class ServerWorld {
     this.bossState = level.bossConfig
       ? createRaycastBossState(level.bossConfig, this.serverTime, { arenaLevelId: level.id })
       : null;
+    this.bossTargetPlayerId = null;
+    this.bossTargetSwitchAt = 0;
 
     // Teleport all connected players to the new start position with full HP.
     for (const player of this.playerStates.values()) {
@@ -319,6 +328,26 @@ export class ServerWorld {
       }
     }
 
+    // 0e. Boss movement — server-authoritative position. Runs after exit
+    // detection (which may have just swapped levels and reset bossState) and
+    // before enemy AI so the snapshot built later this tick reflects the boss
+    // at its new position. Volleys still run client-side until Paso B.
+    if (this.bossState?.alive) {
+      this.updateBossTarget(alivePlayers);
+      if (this.bossTargetPlayerId !== null) {
+        const target = this.playerStates.get(this.bossTargetPlayerId);
+        if (target) {
+          tickRaycastBossMovement(
+            this.bossState,
+            this.map,
+            { x: target.x, y: target.y, alive: target.alive, vx: 0, vy: 0 },
+            deltaMs,
+            this.serverTime,
+          );
+        }
+      }
+    }
+
     // 1. Run enemy AI — track kills
     const aliveBeforeTick = this.enemies.filter((e) => e.alive).length;
     const result = tickEnemies(this.map, this.enemies, players, this.serverTime, deltaMs);
@@ -392,6 +421,39 @@ export class ServerWorld {
 
   getServerTime(): number {
     return this.serverTime;
+  }
+
+  /** Test helper — boss state for assertions. */
+  getBossState(): RaycastBossState | null {
+    return this.bossState;
+  }
+
+  /** Test helper — current boss movement target player id. */
+  getBossTargetPlayerId(): string | null {
+    return this.bossTargetPlayerId;
+  }
+
+  /**
+   * Pick the boss's movement target. Round-robin between alive players,
+   * re-picking every BOSS_TARGET_SWITCH_INTERVAL_MS or whenever the current
+   * target is no longer alive/connected.
+   */
+  private updateBossTarget(alivePlayers: PlayerState[]): void {
+    if (alivePlayers.length === 0) {
+      this.bossTargetPlayerId = null;
+      return;
+    }
+    const currentIdx =
+      this.bossTargetPlayerId !== null
+        ? alivePlayers.findIndex((p) => p.id === this.bossTargetPlayerId)
+        : -1;
+    const targetLost = currentIdx === -1;
+    const timeUp = this.serverTime >= this.bossTargetSwitchAt;
+    if (targetLost || timeUp) {
+      const nextIdx = targetLost ? 0 : (currentIdx + 1) % alivePlayers.length;
+      this.bossTargetPlayerId = alivePlayers[nextIdx].id;
+      this.bossTargetSwitchAt = this.serverTime + BOSS_TARGET_SWITCH_INTERVAL_MS;
+    }
   }
 
   getSnapshot(tick: number): SnapshotMessage {
