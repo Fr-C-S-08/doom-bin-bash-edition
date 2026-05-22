@@ -78,6 +78,22 @@ export class MenuScene extends Phaser.Scene {
     this.scene.start('SettingsScene');
   };
 
+  private readonly handleOpenMultiplayer = (): void => {
+    const input = window.prompt('Servidor co-op (IP:puerto):', 'localhost:3001');
+    if (!input) return;
+    const url = `ws://${input}`;
+    const playerName = `Player${Math.floor(Math.random() * 1000)}`;
+    this.scene.start('RaycastScene', {
+      netMode: true,
+      serverUrl: url,
+      playerName,
+      carryScore: 0,
+      carryCampaignMetrics: createEmptyCampaignMetrics(),
+      rewardTier: 0,
+      runModifierId: null
+    });
+  };
+
   private readonly handleMenuSelectionUp = (): void => {
     this.menuSelectionIndex = (this.menuSelectionIndex + 2 - 1) % 2;
     this.refreshMenuSelectionVisuals();
@@ -225,6 +241,25 @@ export class MenuScene extends Phaser.Scene {
       .setDepth(8)
       .setAlpha(0.82);
 
+    // Multiplayer entry — sits below the gamepad status line (settingsY + 52).
+    // Treated as an independent action (like boss shortcuts), not in the
+    // gamepad carousel selection index.
+    const multiLine = this.add
+      .text(layout.centerX, layout.settingsY + 52, '[M] MULTIPLAYER  ·  CO-OP LAN', {
+        fontFamily: 'monospace',
+        fontSize: '13px',
+        fontStyle: '700',
+        color: '#4de8b0',
+        align: 'center'
+      })
+      .setOrigin(0.5)
+      .setDepth(8)
+      .setAlpha(0.92)
+      .setInteractive({ useHandCursor: true })
+      .on(Phaser.Input.Events.POINTER_DOWN, this.handleOpenMultiplayer);
+    multiLine.on(Phaser.Input.Events.POINTER_OVER, () => multiLine.setColor('#a0fff0'));
+    multiLine.on(Phaser.Input.Events.POINTER_OUT, () => multiLine.setColor('#4de8b0'));
+
     const shortFooter = width <= 720 || height <= 405;
     const footerFontSize = shortFooter ? '9px' : '10px';
 
@@ -354,6 +389,8 @@ export class MenuScene extends Phaser.Scene {
     kb?.on('keydown-SIX', this.handleBossMenuThree);
     kb?.on('keydown-S', this.handleOpenSettings);
     kb?.on('keydown-s', this.handleOpenSettings);
+    kb?.on('keydown-M', this.handleOpenMultiplayer);
+    kb?.on('keydown-m', this.handleOpenMultiplayer);
     this.inputListenersRegistered = true;
   }
 
@@ -369,6 +406,8 @@ export class MenuScene extends Phaser.Scene {
     kb?.off('keydown-SIX', this.handleBossMenuThree);
     kb?.off('keydown-S', this.handleOpenSettings);
     kb?.off('keydown-s', this.handleOpenSettings);
+    kb?.off('keydown-M', this.handleOpenMultiplayer);
+    kb?.off('keydown-m', this.handleOpenMultiplayer);
     this.gamepadInput?.destroy();
     this.touchInput?.destroy();
     this.inputListenersRegistered = false;

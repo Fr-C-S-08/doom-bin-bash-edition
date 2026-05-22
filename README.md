@@ -6,6 +6,8 @@
 
 **Browser-playable retro-horror raycast FPS** built with **Phaser 3**, **TypeScript**, and **Vite**. The **main product story** is **`RaycastScene`**: menu → settings (optional) → terminal prologue → **Episode 1** (five sectors + boss finale), optional **World 2** / **World 3** when progression allows, plus local **score / high score** and run summary via `SaveManager` (`localStorage`).
 
+Modos de juego: la campaña principal es single-player (descrita abajo). El juego también incluye un modo cooperativo multijugador en LAN para hasta 3 jugadores — ver la sección Modo Multijugador Cooperativo (LAN).
+
 **Engineering:** **Vitest** for core logic, **ESLint**, production **Vite** build, **GitHub Actions** CI.
 
 **Media:** Reference captures live under `docs/assets/`; this README stays text-first. A concrete capture wishlist is in [`docs/demo/screenshots-plan.md`](docs/demo/screenshots-plan.md).
@@ -68,6 +70,7 @@ What you can actually play and show:
 | **Score / high score** | Run scoring, medals/rank where implemented, **localStorage** persistence — **no** server backend. |
 | **HUD / minimap** | Compact terminal-style HUD, objective line, combat strip, **M** minimap (see in-game help). |
 | **World progression** | Episode 1 catalog → boss → optional **World 2** / **World 3** continuation when unlock flow allows (banners and atmosphere differ per arc). |
+| **Multijugador (coop)** | Modo cooperativo PvE en LAN para hasta 3 jugadores sobre RaycastScene, servidor autoritativo a 20 Hz: jugadores/enemigos/combate/llaves/puertas/transición de nivel sincronizados; boss con vida y movimiento server-side. Ver sección dedicada. |
 | **Input / settings** | Keyboard/mouse, gamepad, touch (where supported), `SettingsScene` for session prefs. |
 | **Game Master (LLM)** | Optional **Ollama** narration on gameplay events; overlay subtitles; macOS `say` voice optional — see [docs/llm/ollama-game-master.md](docs/llm/ollama-game-master.md). |
 | **Quality gate** | `npm test`, `npm run lint`, `npm run build` expected green in CI and before releases. |
@@ -139,6 +142,78 @@ npm run dev:full:down    # apagar contenedores
 - Si Ollama falla → `source: fallback` en la API; el FPS sigue.
 
 Modo manual (sin Compose): ver [docs/llm/ollama-game-master.md](docs/llm/ollama-game-master.md).
+
+## Modo Multijugador Cooperativo (LAN)
+
+Modo **cooperativo PvE** sobre `RaycastScene`: hasta **3 jugadores** en red local recorren juntos la campaña completa (13 niveles en 3 mundos, incluyendo bosses). Arquitectura **cliente-servidor con servidor autoritativo** a **20 Hz**.
+
+### Arquitectura
+
+El servidor multijugador vive en el **mismo proceso** que el Game Master: Express (narración Ollama) y un **WebSocket server** comparten el puerto **3001**. El servidor mantiene el estado autoritativo del mundo (jugadores, enemigos, llaves, puertas, triggers, boss) y emite *snapshots* a todos los clientes cada 50 ms; los clientes envían su input y el servidor valida y resuelve la lógica.
+
+| Carpeta | Rol |
+|---------|-----|
+| `server/` | Servidor autoritativo: tick loop 20 Hz, estado del mundo, transiciones de nivel, AI de enemigos y boss server-side. |
+| `shared/` | Tipos y constantes compartidos cliente/servidor (protocolo WebSocket, tick rate, puerto). |
+| `src/game/net/` | Cliente WebSocket dentro de Phaser: conexión, snapshots, reconexión entre niveles. |
+
+### Cómo funciona la conexión
+
+1. El cliente abre un WebSocket a `ws://<ip>:3001` y manda un `hello`.
+2. El servidor responde con un `welcome` (id de jugador, nivel actual, config).
+3. A partir de ahí: el servidor manda `snapshot` (estado del mundo) a 20 Hz; el cliente manda su `input`/`shoot` (también throttleado a 20 Hz).
+4. El servidor es la **única fuente de verdad**: valida disparos, aplica daño, detecta recogida de llaves/apertura de puertas por proximidad, y coordina las transiciones de nivel (cuando un jugador llega al exit, **todos** avanzan juntos).
+
+### Cómo correrlo (local)
+
+En **dos terminales** (no hay script único sin Docker):
+
+```bash
+# Terminal 1 — servidor coop (Express + WebSocket en :3001)
+npm run server:dev
+
+# Terminal 2 — cliente (Vite en :5173)
+npm run dev
+```
+
+En el menú, presiona M y escribe la dirección del servidor en formato IP:puerto (default localhost:3001). Se te asigna un nombre automático.
+
+### Cómo probar en LAN (varias máquinas)
+
+```bash
+# 1. Encuentra la IP de la máquina que corre el servidor
+ipconfig getifaddr en0        # macOS Wi-Fi
+
+# 2. Cliente accesible en la red
+npm run dev -- --host         # Vite expone http://<ip>:5173
+```
+
+Los demás jugadores abren http://<ip>:5173, presionan M y escriben <ip>:3001. El servidor ya acepta conexiones de rangos LAN privados (validación de Origin en server/src/index.ts). En macOS, permite las conexiones entrantes de node si el firewall lo pide. Si la red institucional aísla a los clientes entre sí, usa un hotspot propio.
+
+### Qué se sincroniza (autoritativo en el servidor)
+
+- Posición de jugadores y jugadores remotos visibles entre sí.
+- Enemigos (AI, daño, muertes), director de spawns y triggers.
+- Combate: disparos validados server-side.
+- Llaves, puertas y triggers compartidos (detección por proximidad).
+- Transición de nivel coordinada (Modelo B: un jugador en el exit → todos avanzan).
+- Boss: vida compartida, movimiento y rotación de objetivo server-side.
+
+### Decisiones de diseño
+
+- Servidor autoritativo: el cliente nunca decide daño ni progreso; evita desincronización y trampas. El movimiento del jugador es client-authoritative (responsividad) pero todo lo demás lo valida el servidor.
+- Modelo B de transición: cualquier jugador que llega al exit teletransporta a todo el equipo al siguiente nivel (revive a los caídos). La conexión WebSocket se preserva entre niveles vía el registry de Phaser, sin reconectar.
+- LAN-only: validación de Origin acepta localhost y rangos privados (RFC-1918), rechaza IPs públicas.
+
+### Limitaciones conocidas / mejoras futuras
+
+- Proyectiles del boss: los ataques (volleys) aún se simulan localmente en cada cliente; el boss apunta al mismo objetivo para todos, pero los proyectiles individuales no están sincronizados. Pendiente: simulación determinista server-side.
+- Narración del Game Master en coop: actualmente cada cliente narra local; pendiente narración compartida de eventos globales.
+- Secretos y botiquines: per-jugador (no compartidos), por diseño.
+
+---
+
+Atajo de desarrollo: las teclas 4 / 5 / 6 saltan directamente al boss de World 1 / 2 / 3 (en coop, el servidor lleva a todos juntos). Es una herramienta de debug para pruebas; no forma parte del flujo normal de juego.
 
 ## Docker Quick Start (solo frontend)
 

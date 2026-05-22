@@ -1,0 +1,536 @@
+import type { PlayerState, EnemyState } from '../../shared/types.js';
+import type { SnapshotMessage, ServerEvent } from '../../shared/protocol.js';
+import { tickEnemies, findTargetPlayer } from './EnemySystem.js';
+import { DirectorSystem } from './DirectorSystem.js';
+import { cloneRaycastEnemies, createRaycastEnemy, type RaycastEnemy } from '../../src/game/raycast/RaycastEnemy.js';
+import {
+  computeRaycastBossWeaponDamage,
+  createRaycastBossState,
+  damageRaycastBoss,
+  tickRaycastBossMovement,
+  type RaycastBossState,
+} from '../../src/game/raycast/RaycastBoss.js';
+
+/** How often (ms) the boss re-picks its movement target in co-op. */
+const BOSS_TARGET_SWITCH_INTERVAL_MS = 4500;
+import {
+  cloneRaycastMap,
+  findRaycastZoneId,
+  getRaycastExitAccess,
+  getRaycastLevelById,
+  isNearPoint,
+  openRaycastDoor,
+  RAYCAST_LEVEL,
+  type RaycastLevel,
+} from '../../src/game/raycast/RaycastLevel.js';
+import { resolveRaycastNextLevelId } from '../../src/game/raycast/RaycastEpisode.js';
+import type { RaycastMap } from '../../src/game/raycast/RaycastMap.js';
+import type { SpawnRequest } from '../../src/game/systems/GameDirector.js';
+import { findEnemyInCrosshair } from '../../src/game/raycast/RaycastCombatSystem.js';
+import { castRay } from '../../src/game/raycast/RaycastMap.js';
+import { applyDamage } from '../../src/game/systems/CombatSystem.js';
+import { WEAPON_ORDER, getWeaponConfig } from '../../src/game/systems/WeaponConfig.js';
+import { TriggerSystem } from '../../src/game/systems/TriggerSystem.js';
+import { KeySystem } from '../../src/game/systems/KeySystem.js';
+import { DoorSystem } from '../../src/game/systems/DoorSystem.js';
+import { RESPAWN_COOLDOWN_MS, TICK_INTERVAL_MS } from '../../shared/constants.js';
+
+export class ServerWorld {
+  private readonly playerStates = new Map<string, PlayerState>();
+  private readonly pendingEvents: ServerEvent[] = [];
+
+  // Level state — mutated by loadLevel() on level transitions.
+  private currentLevel!: RaycastLevel;
+  private currentLevelId = '';
+  private enemies: RaycastEnemy[] = [];
+  private map!: RaycastMap;
+  private director!: DirectorSystem;
+  private triggerSystem!: TriggerSystem;
+  private keySystem!: KeySystem;
+  private doorSystem!: DoorSystem;
+  // Authoritative boss state for arenas with a bossConfig. Null on non-boss levels.
+  // Movement now runs server-side too (target rotates between players by time);
+  // volleys still run client-side until Paso B.
+  private bossState: RaycastBossState | null = null;
+  // Current movement target id and when to re-pick. Reset on loadLevel.
+  private bossTargetPlayerId: string | null = null;
+  private bossTargetSwitchAt = 0;
+
+  private serverTime = 0;
+  private currentTick = 0;
+  private totalKills = 0;
+  private gameOverFired = false;
+  // When true, the campaign is finished and no further level transitions occur.
+  private sessionComplete = false;
+  // Initialized to 0; loadLevel() resets to serverTime so timeSincePlayerDamagedMs
+  // starts at 0 for each new level.
+  private lastPlayerDamageAt = 0;
+  // Diagnostic: throttle "exit blocked" logs to one per exit per 2 seconds.
+  private readonly exitBlockedLogAt = new Map<string, number>();
+
+  constructor() {
+    // serverTime is 0 at construction, so lastPlayerDamageAt will be set to 0.
+    this.loadLevel(RAYCAST_LEVEL.id);
+  }
+
+  /**
+   * Loads a level by ID, resetting all per-level state. Connected players are
+   * teleported to the new level's playerStart with full HP.
+   * serverTime is NOT reset so the director's timing remains continuous
+   * across transitions — the director won't re-enter its initial CALM window.
+   */
+  loadLevel(levelId: string): void {
+    const previousId = this.currentLevelId || '(none)';
+    console.log(`[server] loadLevel: ${previousId} → ${levelId} (players: ${this.playerStates.size})`);
+    const level = getRaycastLevelById(levelId);
+    this.currentLevel = level;
+    this.currentLevelId = level.id;
+    this.exitBlockedLogAt.clear();
+
+    this.enemies = cloneRaycastEnemies(level);
+    // Clone so openRaycastDoor mutations are isolated to this instance.
+    this.map = cloneRaycastMap(level.map);
+    this.director = new DirectorSystem(level.director.config, level.director.spawnPoints);
+    this.keySystem = new KeySystem();
+    this.doorSystem = new DoorSystem(this.keySystem);
+    this.triggerSystem = new TriggerSystem();
+
+    this.totalKills = 0;
+    this.gameOverFired = false;
+    // Reset damage timer relative to current serverTime so the director sees
+    // 0 ms since last damage at the start of the new level.
+    this.lastPlayerDamageAt = this.serverTime;
+
+    this.bossState = level.bossConfig
+      ? createRaycastBossState(level.bossConfig, this.serverTime, { arenaLevelId: level.id })
+      : null;
+    this.bossTargetPlayerId = null;
+    this.bossTargetSwitchAt = 0;
+
+    // Teleport all connected players to the new start position with full HP.
+    for (const player of this.playerStates.values()) {
+      player.x = level.playerStart.x;
+      player.y = level.playerStart.y;
+      player.yaw = level.playerStart.angle;
+      player.hp = player.maxHp;
+      player.alive = true;
+      player.respawnAtTick = undefined;
+    }
+  }
+
+  /** Current level ID — exposed for tests and the welcome message. */
+  getCurrentLevelId(): string {
+    return this.currentLevelId;
+  }
+
+  addPlayer(id: string, name: string): void {
+    this.playerStates.set(id, {
+      id,
+      name,
+      x: this.currentLevel.playerStart.x,
+      y: this.currentLevel.playerStart.y,
+      yaw: this.currentLevel.playerStart.angle,
+      hp: 100,
+      maxHp: 100,
+      weapon: 1,
+      alive: true,
+    });
+  }
+
+  removePlayer(id: string): void {
+    this.playerStates.delete(id);
+  }
+
+  updatePlayerInput(id: string, input: { x: number; y: number; yaw: number; seq: number }): void {
+    const player = this.playerStates.get(id);
+    if (!player) return;
+    player.x = input.x;
+    player.y = input.y;
+    player.yaw = input.yaw;
+  }
+
+  handleShoot(playerId: string, x: number, y: number, yaw: number, weaponSlot: number): void {
+    const player = this.playerStates.get(playerId);
+    if (!player?.alive) return;
+
+    if (weaponSlot < 1 || weaponSlot > WEAPON_ORDER.length) {
+      console.warn(`[server] shoot from playerId=${playerId} invalid weapon=${weaponSlot}`);
+      return;
+    }
+
+    const kindIndex = Math.max(0, Math.min(weaponSlot - 1, WEAPON_ORDER.length - 1));
+    const weaponKind = WEAPON_ORDER[kindIndex];
+    const config = getWeaponConfig(weaponKind, 'raycast');
+
+    const hit = castRay(this.map, x, y, yaw, yaw);
+    const wallDistance = hit.distance;
+
+    const fakePlayer = { x, y, angle: yaw };
+    const enemy = findEnemyInCrosshair(
+      fakePlayer,
+      this.enemies.filter((e) => e.alive),
+      wallDistance,
+      config.aimToleranceRadians,
+    );
+
+    if (enemy) {
+      applyDamage(enemy, config.damage * config.pelletCount);
+    }
+
+    // Boss: authoritative HP server-side. Movement/AI/volleys still run on the
+    // client at this milestone — we only resolve the hitscan damage here.
+    if (this.bossState?.alive) {
+      const bossPlayer = { x, y, angle: yaw, velocity: { x: 0, y: 0 } };
+      const bossDamage = computeRaycastBossWeaponDamage(
+        this.bossState,
+        bossPlayer,
+        this.map,
+        weaponKind,
+        'raycast',
+      );
+      if (bossDamage > 0) {
+        damageRaycastBoss(this.bossState, bossDamage, this.serverTime, {
+          fromX: x,
+          fromY: y,
+          map: this.map,
+        });
+      }
+    }
+  }
+
+  tick(deltaMs: number): void {
+    this.serverTime += deltaMs;
+    this.currentTick += 1;
+    const players = Array.from(this.playerStates.values());
+
+    // 0. Check for auto-respawn
+    const respawnTicks = Math.ceil(RESPAWN_COOLDOWN_MS / TICK_INTERVAL_MS);
+    for (const p of players) {
+      if (!p.alive && p.respawnAtTick !== undefined && this.currentTick >= p.respawnAtTick) {
+        p.hp = p.maxHp;
+        p.alive = true;
+        p.x = this.currentLevel.playerStart.x;
+        p.y = this.currentLevel.playerStart.y;
+        p.yaw = this.currentLevel.playerStart.angle;
+        p.respawnAtTick = undefined;
+      }
+    }
+
+    const alivePlayers = players.filter((p) => p.alive);
+
+    // 0a. Detect key pickups by player proximity (server-authoritative).
+    for (const key of this.currentLevel.keys) {
+      if (this.keySystem.hasKey(key.id)) continue;
+      for (const player of alivePlayers) {
+        if (isNearPoint(player.x, player.y, key)) {
+          this.keySystem.collect(key);
+          this.pendingEvents.push({ type: 'event', kind: 'keyPickup', color: key.id, by: player.name });
+          break;
+        }
+      }
+    }
+
+    // 0b. Detect door openings by player proximity (server-authoritative).
+    const DOOR_INTERACT_RADIUS = 0.78;
+    for (const door of this.currentLevel.doors) {
+      if (this.doorSystem.isOpen(door.id)) continue;
+      for (const player of alivePlayers) {
+        if (isNearPoint(player.x, player.y, { x: door.x, y: door.y, radius: DOOR_INTERACT_RADIUS })) {
+          const result = this.doorSystem.attemptOpen(door, 0);
+          if (result.opened) {
+            openRaycastDoor(this.map, door);
+            this.pendingEvents.push({ type: 'event', kind: 'doorOpen', id: door.id });
+          }
+          break;
+        }
+      }
+    }
+
+    // 0c. Process level triggers for every alive player.
+    const triggerPoints = alivePlayers.map((p) => ({ x: p.x, y: p.y }));
+    for (const trigger of this.currentLevel.triggers) {
+      const activated = this.triggerSystem.activateIfEntered(trigger, triggerPoints, {
+        isDoorOpen: (id) => this.doorSystem.isOpen(id),
+      });
+      if (!activated) continue;
+
+      this.director.notifyZoneTrigger(trigger.id, this.serverTime);
+
+      for (const spawn of trigger.spawns) {
+        const id = `trigger-${trigger.id}-${this.serverTime.toFixed(0)}-${Math.random().toString(36).slice(2, 6)}`;
+        this.enemies.push(createRaycastEnemy({ id, kind: spawn.kind, x: spawn.x, y: spawn.y }));
+      }
+    }
+
+    // 0d. Detect level exit — check if any alive player reached the exit and
+    // all progression conditions are met. Emits levelChange (or levelClear
+    // for the final level) and immediately loads the next level so subsequent
+    // ticks run in the new level context.
+    if (!this.sessionComplete && alivePlayers.length > 0) {
+      exitCheck: for (const exit of this.currentLevel.exits) {
+        for (const player of alivePlayers) {
+          if (!isNearPoint(player.x, player.y, exit)) continue;
+
+          const access = getRaycastExitAccess(this.currentLevel, {
+            collectedKeyIds: this.currentLevel.keys
+              .filter((k) => this.keySystem.hasKey(k.id))
+              .map((k) => k.id),
+            openDoorIds: this.currentLevel.doors
+              .filter((d) => this.doorSystem.isOpen(d.id))
+              .map((d) => d.id),
+            activatedTriggerIds: this.currentLevel.triggers
+              .filter((t) => this.triggerSystem.hasActivated(t.id))
+              .map((t) => t.id),
+            livingEnemyCount: this.enemies.filter((e) => e.alive).length,
+            // Non-boss arenas: bossState is null → defeated. Boss arenas: gated on real alive flag.
+            bossDefeated: this.bossState === null || !this.bossState.alive,
+          });
+
+          if (!access.allowed) {
+            const lastLogAt = this.exitBlockedLogAt.get(exit.id) ?? -Infinity;
+            if (this.serverTime - lastLogAt >= 2000) {
+              this.exitBlockedLogAt.set(exit.id, this.serverTime);
+              const req = this.currentLevel.progression;
+              const enemiesAlive = this.enemies.filter((e) => e.alive).length;
+              console.log(
+                `[server] exit ${exit.id} bloqueado: ` +
+                  `keys=[${access.missingKeyIds?.join(',') ?? ''}] ` +
+                  `doors=[${access.missingDoorIds?.join(',') ?? ''}] ` +
+                  `triggers=[${access.missingTriggerIds?.join(',') ?? ''}] ` +
+                  `enemiesAlive=${enemiesAlive} ` +
+                  `needsCombatClear=${Boolean(req.requireCombatClear)} ` +
+                  `needsBoss=${Boolean(req.requireBossDefeated)} ` +
+                  `reason=${access.reason ?? '?'}`,
+              );
+            }
+            continue;
+          }
+
+          const nextLevelId = resolveRaycastNextLevelId(this.currentLevelId);
+          console.log(
+            `[server] EXIT activado en ${this.currentLevelId} por player ${player.id} → ` +
+              `emitiendo levelChange a ${nextLevelId ?? '(none)'}`,
+          );
+
+          if (nextLevelId === null) {
+            console.log(`[server] campaña completa, no hay siguiente nivel desde ${this.currentLevelId}`);
+            // Final level cleared — campaign complete.
+            this.pendingEvents.push({ type: 'event', kind: 'levelClear' });
+            this.sessionComplete = true;
+          } else {
+            this.pendingEvents.push({ type: 'event', kind: 'levelChange', nextLevelId });
+            // loadLevel immediately replaces this.currentLevel, so the loop
+            // would operate on the new level's data. Break out to avoid that.
+            this.loadLevel(nextLevelId);
+          }
+          break exitCheck;
+        }
+      }
+    }
+
+    // 0e. Boss movement — server-authoritative position. Runs after exit
+    // detection (which may have just swapped levels and reset bossState) and
+    // before enemy AI so the snapshot built later this tick reflects the boss
+    // at its new position. Volleys still run client-side until Paso B.
+    if (this.bossState?.alive) {
+      this.updateBossTarget(alivePlayers);
+      if (this.bossTargetPlayerId !== null) {
+        const target = this.playerStates.get(this.bossTargetPlayerId);
+        if (target) {
+          tickRaycastBossMovement(
+            this.bossState,
+            this.map,
+            { x: target.x, y: target.y, alive: target.alive, vx: 0, vy: 0 },
+            deltaMs,
+            this.serverTime,
+          );
+        }
+      }
+    }
+
+    // 1. Run enemy AI — track kills
+    const aliveBeforeTick = this.enemies.filter((e) => e.alive).length;
+    const result = tickEnemies(this.map, this.enemies, players, this.serverTime, deltaMs);
+    const aliveAfterTick = this.enemies.filter((e) => e.alive).length;
+    this.totalKills += Math.max(0, aliveBeforeTick - aliveAfterTick);
+
+    // 2. Apply melee damage to the nearest alive player
+    if (result.meleeDamage > 0) {
+      const target = findTargetPlayer(this.enemies, players);
+      if (target) {
+        target.hp = Math.max(0, target.hp - result.meleeDamage);
+        if (target.hp <= 0) {
+          target.alive = false;
+          target.respawnAtTick = this.currentTick + respawnTicks;
+        }
+        this.lastPlayerDamageAt = this.serverTime;
+      }
+    }
+
+    // 3. Run director — possibly spawn new enemies.
+    const sortedByHp = [...players].sort((a, b) => a.hp - b.hp);
+    const p1 = sortedByHp[0] ?? null;
+    const p2 = sortedByHp[1] ?? null;
+
+    const currentWave = Math.floor(this.totalKills / 3) + 1;
+
+    const activeZoneId =
+      p1 && p1.alive ? findRaycastZoneId(this.currentLevel, p1.x, p1.y) : null;
+
+    const aliveEnemyKindCounts = this.enemies
+      .filter((e) => e.alive)
+      .reduce((acc, e) => {
+        acc[e.kind] = (acc[e.kind] ?? 0) + 1;
+        return acc;
+      }, {} as Partial<Record<RaycastEnemy['kind'], number>>);
+
+    const decision = this.director.update({
+      elapsedTime: this.serverTime,
+      totalKills: this.totalKills,
+      enemiesAlive: aliveAfterTick,
+      p1Health: p1?.hp ?? 0,
+      p2Health: p2?.hp ?? 0,
+      p1Alive: p1?.alive ?? false,
+      p2Alive: p2?.alive ?? false,
+      currentWave,
+      timeSincePlayerDamagedMs: this.serverTime - this.lastPlayerDamageAt,
+      activeZoneId,
+      aliveEnemyKindCounts,
+    });
+
+    if (decision.spawn) this.spawnEnemy(decision.spawn);
+    for (const extra of decision.extraSpawns) this.spawnEnemy(extra);
+
+    // 4. Check for game over (all players dead, no pending respawn)
+    if (!this.gameOverFired && this.playerStates.size > 0) {
+      const allDead = players.every((p) => !p.alive);
+      if (allDead) {
+        this.gameOverFired = true;
+        this.pendingEvents.push({ type: 'event', kind: 'gameOver' });
+      }
+    }
+  }
+
+  drainEvents(): ServerEvent[] {
+    return this.pendingEvents.splice(0);
+  }
+
+  /**
+   * DEBUG: jump all connected players to the given level. Mirrors the exit-detection
+   * flow (push levelChange event, then loadLevel) so the existing client handler
+   * transitions everyone in sync. Remove or gate before shipping.
+   */
+  debugJumpToLevel(levelId: string): void {
+    console.log(`[server] DEBUG debugJumpToLevel → ${levelId}`);
+    this.pendingEvents.push({ type: 'event', kind: 'levelChange', nextLevelId: levelId });
+    this.loadLevel(levelId);
+  }
+
+  getLastPlayerDamageAt(): number {
+    return this.lastPlayerDamageAt;
+  }
+
+  getServerTime(): number {
+    return this.serverTime;
+  }
+
+  /** Test helper — boss state for assertions. */
+  getBossState(): RaycastBossState | null {
+    return this.bossState;
+  }
+
+  /** Test helper — current boss movement target player id. */
+  getBossTargetPlayerId(): string | null {
+    return this.bossTargetPlayerId;
+  }
+
+  /**
+   * Pick the boss's movement target. Round-robin between alive players,
+   * re-picking every BOSS_TARGET_SWITCH_INTERVAL_MS or whenever the current
+   * target is no longer alive/connected.
+   */
+  private updateBossTarget(alivePlayers: PlayerState[]): void {
+    const prevTargetId = this.bossTargetPlayerId;
+    if (alivePlayers.length === 0) {
+      this.bossTargetPlayerId = null;
+      if (prevTargetId !== null) {
+        // DEBUG: temporary diagnostic for boss target rotation. Remove before shipping.
+        console.log(`[server] boss target → null (alive: 0)`);
+      }
+      return;
+    }
+    const currentIdx =
+      this.bossTargetPlayerId !== null
+        ? alivePlayers.findIndex((p) => p.id === this.bossTargetPlayerId)
+        : -1;
+    const targetLost = currentIdx === -1;
+    const timeUp = this.serverTime >= this.bossTargetSwitchAt;
+    if (targetLost || timeUp) {
+      const nextIdx = targetLost ? 0 : (currentIdx + 1) % alivePlayers.length;
+      this.bossTargetPlayerId = alivePlayers[nextIdx].id;
+      this.bossTargetSwitchAt = this.serverTime + BOSS_TARGET_SWITCH_INTERVAL_MS;
+    }
+    if (this.bossTargetPlayerId !== prevTargetId) {
+      // DEBUG: temporary diagnostic for boss target rotation. Remove before shipping.
+      console.log(`[server] boss target → ${this.bossTargetPlayerId} (alive: ${alivePlayers.length})`);
+    }
+  }
+
+  getSnapshot(tick: number): SnapshotMessage {
+    return {
+      type: 'snapshot',
+      tick,
+      serverTime: Date.now(),
+      players: Array.from(this.playerStates.values()),
+      enemies: this.enemies.map((e) => this.toEnemyState(e)),
+      projectiles: [],
+      items: [],
+      doors: this.currentLevel.doors.map((door) => ({
+        id: door.id,
+        open: this.doorSystem.isOpen(door.id),
+        requiresKey: door.keyId,
+      })),
+      level: {
+        keysCollected: this.currentLevel.keys
+          .filter((key) => this.keySystem.hasKey(key.id))
+          .map((key) => key.id),
+        exitActive: false,
+        secretsFound: 0,
+        ...(this.bossState
+          ? {
+              bossHp: this.bossState.health,
+              bossMaxHp: this.bossState.maxHealth,
+              bossAlive: this.bossState.alive,
+              bossX: this.bossState.x,
+              bossY: this.bossState.y,
+              ...(this.bossTargetPlayerId !== null ? { bossTargetId: this.bossTargetPlayerId } : {}),
+            }
+          : {}),
+      },
+    };
+  }
+
+  private spawnEnemy(req: SpawnRequest): void {
+    const id = `srv-${this.serverTime.toFixed(0)}-${Math.random().toString(36).slice(2, 6)}`;
+    const enemy = createRaycastEnemy({ id, kind: req.kind, x: req.x, y: req.y });
+    this.enemies.push(enemy);
+  }
+
+  private toEnemyState(e: RaycastEnemy): EnemyState {
+    let state: EnemyState['state'];
+    if (!e.alive) state = 'DEAD';
+    else if (e.spawnTelegraphUntil > this.serverTime) state = 'SPAWN';
+    else if (e.attackWindupUntil > this.serverTime) state = 'ATTACK';
+    else state = 'CHASE';
+
+    return {
+      id: e.id,
+      archetype: e.kind as EnemyState['archetype'],
+      x: e.x,
+      y: e.y,
+      yaw: 0,
+      hp: e.health,
+      state,
+    };
+  }
+}

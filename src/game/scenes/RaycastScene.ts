@@ -36,6 +36,7 @@ import {
 import { getRaycastCrosshairTargetInfo, RaycastCombatSystem } from '../raycast/RaycastCombatSystem';
 import {
   cloneRaycastEnemies,
+  createRaycastEnemy,
   createTelegraphedRaycastEnemy,
   didRaycastEnemyFinishTelegraph,
   type RaycastEnemy
@@ -107,9 +108,11 @@ import {
   damageRaycastBoss,
   getRaycastBossPhaseLabel,
   getRaycastBossCrosshairTarget,
+  syncRaycastBossPhase,
   tickRaycastBossArenaTwist,
   tickRaycastBossMovement,
   tickRaycastBossVolleys,
+  type RaycastBossPlayerContext,
   type RaycastBossState
 } from '../raycast/RaycastBoss';
 import {
@@ -313,6 +316,12 @@ import { RaycastTouchInput } from '../systems/RaycastTouchInput';
 import { palette } from '../theme/palette';
 import { getSaveManager } from '../save/SaveManager';
 import { prepareGameSession } from '../save/persistSessionSettings';
+import { NetClient } from '../net/NetClient';
+import { NetState } from '../net/NetState';
+import type { SnapshotMessage } from '../../../shared/protocol';
+import type { EnemyState } from '../../../shared/types';
+import { TICK_INTERVAL_MS } from '../../../shared/constants';
+import { WEAPON_ORDER } from '../systems/WeaponConfig';
 import {
   getAimAssistLevel,
   getCameraSmoothing,
@@ -370,6 +379,13 @@ interface RaycastSceneData {
   rewardTier?: number;
   /** Optional pre-run/world roulette modifier. */
   runModifierId?: RunModifierId | null;
+  // ── Multiplayer / co-op ──────────────────────────────────────────────────
+  /** When true the scene connects to a WebSocket server and enters co-op mode. */
+  netMode?: boolean;
+  /** WebSocket URL of the co-op server (e.g. "ws://192.168.1.10:3001"). */
+  serverUrl?: string;
+  /** Player display name shown to other clients. */
+  playerName?: string;
 }
 
 const DIRECTOR_SPAWN_TELEGRAPH_MS = 820;
@@ -470,6 +486,18 @@ export class RaycastScene extends Phaser.Scene {
   private audioMasterVolume = 1;
   private billboardSig = '';
   private cachedBillboards: RaycastBillboard[] = [];
+  // ── Multiplayer / co-op net state ──────────────────────────────────────────
+  private netClient: NetClient | null = null;
+  private netState: NetState | null = null;
+  private netConnected = false;
+  private netInputThrottle = 0;
+  // True during a server-driven level transition: keeps the WebSocket alive across scene.restart().
+  private netTransitioning = false;
+  private netServerUrl: string | null = null;
+  private netPlayerName: string | null = null;
+  // Co-op: player id the server's boss is currently aiming at. Used to point
+  // local volleys at the same target the server picked (visible rotation).
+  private coopBossTargetId: string | null = null;
   private minimapFrameCounter = 0;
   private readonly minimapKeyIdScratch: string[] = [];
   private readonly minimapDoorIdScratch: string[] = [];
@@ -557,6 +585,10 @@ export class RaycastScene extends Phaser.Scene {
   private blackoutPulseUntil = 0;
   private flashBlindUntil = 0;
   private lastDevShortcutAt = 0;
+  // DEBUG: throttle window so a single keypress that fires both keydown and
+  // keydown-FOUR/FIVE/SIX handlers only sends one debugJumpToLevel message.
+  // Remove or gate before shipping.
+  private lastDebugJumpRequestAt = 0;
   private nextBossAddSpawnAt = 0;
 
   private readonly handleExitToMenu = (): void => {
@@ -574,6 +606,8 @@ export class RaycastScene extends Phaser.Scene {
       if (started) this.setCombatMessage('RECARGANDO...');
       return;
     }
+    // In co-op the server controls respawn — do not restart the level locally.
+    if (this.netConnected) return;
     this.restartCurrentLevel();
   };
 
@@ -598,6 +632,8 @@ export class RaycastScene extends Phaser.Scene {
   private readonly handleAdvanceLevel = (): void => {
     if (!this.isRaycastSceneActive()) return;
     if (this.gamePaused) return;
+    // In co-op, the server drives level transitions via the levelChange event — do not restart locally.
+    if (this.netConnected) return;
     if (!this.levelComplete || this.episodeComplete || this.nextLevelId === null) return;
     const nextId = this.nextLevelId;
     const breachWorldTwo =
@@ -717,6 +753,9 @@ export class RaycastScene extends Phaser.Scene {
 
   private handleDevJumpToLevel(levelId: string, label: string): void {
     if (this.gamePaused || !this.isRaycastSceneActive()) return;
+    // DEBUG: in co-op, route through the server so the local scene.restart
+    // below does not kill the WebSocket. Remove or gate before shipping.
+    if (this.requestDebugJumpToLevel(levelId)) return;
     this.setCombatMessage(`SALTO // ${label.toUpperCase()}`, 2000);
     this.scene.restart({
       levelId,
@@ -726,6 +765,24 @@ export class RaycastScene extends Phaser.Scene {
       rewardTier: this.rewardTier,
       runModifierId: this.runModifier?.id ?? null
     });
+  }
+
+  /**
+   * DEBUG: single entry point for both debug-jump handlers (jumpToBossArena
+   * and handleDevJumpToLevel). In co-op, sends one debugJumpToLevel message
+   * to the server and returns true so the caller skips its local
+   * scene.restart (which would kill the WebSocket). Returns false in
+   * single-player so the caller handles the restart itself. Throttles
+   * duplicate requests within 200ms — when a key press triggers both
+   * keydown and keydown-FOUR/FIVE/SIX handlers in the same frame, only the
+   * first send goes out. Remove or gate before shipping.
+   */
+  private requestDebugJumpToLevel(levelId: string): boolean {
+    if (!this.netConnected || !this.netClient) return false;
+    if (this.time.now - this.lastDebugJumpRequestAt < 200) return true;
+    this.lastDebugJumpRequestAt = this.time.now;
+    this.netClient.send({ type: 'debugJumpToLevel', levelId });
+    return true;
   }
 
   private readonly handleDevBossShortcut = (event: KeyboardEvent): void => {
@@ -749,8 +806,12 @@ export class RaycastScene extends Phaser.Scene {
 
   private jumpToBossArena(slot: RaycastBossShortcutSlot): void {
     if (!this.isRaycastSceneActive()) return;
+    const levelId = getRaycastBossLevelId(slot);
+    // DEBUG: in co-op, ask the server to jump everyone (preserves the
+    // live WebSocket). Remove or gate before shipping.
+    if (this.requestDebugJumpToLevel(levelId)) return;
     this.scene.restart({
-      levelId: getRaycastBossLevelId(slot),
+      levelId,
       difficultyId: this.difficultyId,
       carryScore: 0,
       carryCampaignMetrics: createEmptyCampaignMetrics(),
@@ -959,6 +1020,53 @@ export class RaycastScene extends Phaser.Scene {
     this.campaignMetrics = data.carryCampaignMetrics ?? createEmptyCampaignMetrics();
     this.rewardTier = Math.max(0, data.rewardTier ?? 0);
     this.runModifier = getRunModifierById(data.runModifierId ?? null);
+
+    // ── Multiplayer: connect to co-op server (or reuse live socket after level transition) ──
+    this.netTransitioning = false;
+
+    if (data.netMode) {
+      this.netServerUrl = data.serverUrl ?? null;
+      this.netPlayerName = data.playerName ?? 'Player';
+      this.netInputThrottle = 0;
+
+      const existingClient = this.registry.get('coopNetClient') as NetClient | null;
+      if (existingClient) {
+        // Level transition: reuse the live WebSocket — no reconnect needed.
+        this.netClient = existingClient;
+        this.netState = (this.registry.get('coopNetState') as NetState | null) ?? new NetState();
+        this.registry.remove('coopNetClient');
+        this.registry.remove('coopNetState');
+        this.netState.localPlayerId = this.netClient.playerId;
+        this.registerNetHandlers();
+        this.netConnected = true;
+      } else if (data.serverUrl) {
+        // Fresh connection from menu.
+        this.netClient = new NetClient();
+        this.netState = new NetState();
+        this.netConnected = false;
+        const playerName = this.netPlayerName;
+        const serverUrl = data.serverUrl;
+        this.netClient.connect(serverUrl, playerName).then(() => {
+          if (!this.netClient || !this.netState) return;
+          this.netState.localPlayerId = this.netClient.playerId;
+          this.registerNetHandlers();
+          this.netConnected = true;
+        }).catch((err: unknown) => {
+          console.warn('[RaycastScene] multiplayer connect failed:', err);
+          this.netClient = null;
+          this.netState = null;
+          this.netConnected = false;
+        });
+      } else {
+        this.netClient = null;
+        this.netState = null;
+        this.netConnected = false;
+      }
+    } else {
+      this.netClient = null;
+      this.netState = null;
+      this.netConnected = false;
+    }
   }
 
   create(): void {
@@ -1508,13 +1616,24 @@ export class RaycastScene extends Phaser.Scene {
       this.controller.update(deltaMs);
       this.updatePlayerMetrics(deltaMs);
       this.updateLevelState();
-      this.updateEnemies(deltaMs);
-      this.updateGameDirector();
+      // In co-op the server runs the enemy AI and director — skip local simulation.
+      if (!this.netConnected) {
+        this.updateEnemies(deltaMs);
+        this.updateGameDirector();
+      }
       this.updateAtmospherePulse();
       this.updateCorruptionSurge();
       this.updateBlackoutPulse();
       this.updateBossArenaHazards();
       this.applyPassiveHeal(deltaMs);
+      // Co-op: send player position to server at ~20 Hz (server tick rate).
+      if (this.netConnected && this.netClient) {
+        this.netInputThrottle += deltaMs;
+        if (this.netInputThrottle >= TICK_INTERVAL_MS) {
+          this.netInputThrottle -= TICK_INTERVAL_MS;
+          this.netClient.sendInput(this.player.x, this.player.y, this.player.angle, []);
+        }
+      }
     }
     const atmosphere = this.getAtmosphereOptions();
     const viewKick = this.combatFeelState.cameraKickRad;
@@ -1525,7 +1644,10 @@ export class RaycastScene extends Phaser.Scene {
     renderMs += performance.now() - renderStartMs;
     this.refreshBillboardCache();
     const billboardsStartMs = performance.now();
-    this.raycastRenderer.renderBillboards(this.player, this.cachedBillboards, GAME_WIDTH, GAME_HEIGHT);
+    const allBillboards = this.netConnected && this.netState
+      ? [...this.cachedBillboards, ...this.buildRemotePlayerBillboards()]
+      : this.cachedBillboards;
+    this.raycastRenderer.renderBillboards(this.player, allBillboards, GAME_WIDTH, GAME_HEIGHT);
     renderMs += performance.now() - billboardsStartMs;
     const spritesStartMs = performance.now();
     this.raycastRenderer.renderEnemies(this.player, this.enemies, GAME_WIDTH, GAME_HEIGHT, this.time.now, atmosphere);
@@ -1936,8 +2058,75 @@ export class RaycastScene extends Phaser.Scene {
     this.inputListenersRegistered = true;
   }
 
+  private registerNetHandlers(): void {
+    if (!this.netClient || !this.netState) return;
+
+    this.netClient.on<SnapshotMessage>('snapshot', (snap) => {
+      if (!this.netState) return;
+      this.netState.applySnapshot(snap);
+      this.syncEnemiesFromSnapshot(snap.enemies);
+      this.syncLevelStateFromSnapshot(snap);
+      const local = this.netState.getLocalPlayer();
+      if (local) {
+        this.playerHealth = local.hp;
+        if (!local.alive) {
+          this.playerAlive = false;
+        } else if (!this.playerAlive && local.alive) {
+          // Server respawned us — restore position and mark alive.
+          this.playerAlive = true;
+          this.playerHealth = local.hp;
+          this.player.x = local.x;
+          this.player.y = local.y;
+          this.player.angle = local.yaw;
+        }
+      }
+    });
+
+    this.netClient.on<{ type: string; kind: string; nextLevelId?: string }>('event', (ev) => {
+      if (ev.kind === 'gameOver') {
+        // All players down — show overlay directly without showRunCompleteOverlay()
+        // so we don't contaminate telemetry/save data with co-op game-over state.
+        this.playerAlive = false;
+        this.finalOverlay?.setVisible(true).setAlpha(0.9);
+        this.finalTitleText?.setText('GAME OVER').setColor('#cc2222').setVisible(true);
+        this.finalSummaryText?.setText('Todos los jugadores han caído.').setVisible(true);
+        this.finalHintText?.setText('ESC → MENÚ').setVisible(true);
+      } else if (ev.kind === 'levelChange' && ev.nextLevelId) {
+        // Server advanced all players to the next level.
+        // Park the live WebSocket in the registry so the new scene instance can reuse it.
+        this.registry.set('coopNetClient', this.netClient);
+        this.registry.set('coopNetState', this.netState);
+        this.netTransitioning = true;
+        this.stopGameMasterPresentation('level_transition');
+        this.scene.restart({
+          levelId: ev.nextLevelId,
+          netMode: true,
+          serverUrl: this.netServerUrl ?? undefined,
+          playerName: this.netPlayerName ?? 'Player',
+          difficultyId: this.difficultyId,
+          carryScore: this.runScore,
+          carryCampaignMetrics: this.campaignMetrics,
+          rewardTier: this.rewardTier,
+          runModifierId: this.runModifier?.id ?? null,
+        });
+      }
+    });
+  }
+
   private cleanupSceneLifecycle(): void {
     this.stopGameMasterPresentation('scene_shutdown');
+    if (this.netTransitioning) {
+      // Level transition: the live WebSocket is already saved in the registry.
+      // Drop old handlers (they close over the old scene's 'this') without closing the socket.
+      this.netClient?.clearListeners();
+    } else {
+      // Normal exit (menu, restart): close the socket.
+      this.netClient?.disconnect();
+    }
+    this.netClient = null;
+    this.netState = null;
+    this.netConnected = false;
+    this.netTransitioning = false;
     if (!this.sceneReady && !this.inputListenersRegistered) return;
     this.sceneReady = false;
     this.gamepadInput?.destroy();
@@ -2090,8 +2279,36 @@ export class RaycastScene extends Phaser.Scene {
   private fireWeapon(): void {
     if (!this.canHandleRaycastInput()) return;
     if (!this.playerAlive || this.levelComplete) return;
+
+    // Co-op: snapshot enemy HP/alive before firing so combat.fire() can produce
+    // full visual/audio feedback (hit markers, kill sounds) without mutating
+    // server-authoritative state. We restore immediately after.
+    type EnemySnapshot = { health: number; alive: boolean };
+    const enemySnapshots: EnemySnapshot[] | null = this.netConnected
+      ? this.enemies.map((e) => ({ health: e.health, alive: e.alive }))
+      : null;
+
     const result = this.combat.fire(this.player, this.enemies, this.map, this.time.now);
+
+    if (enemySnapshots) {
+      for (let i = 0; i < this.enemies.length; i++) {
+        const snap = enemySnapshots[i];
+        if (snap) {
+          this.enemies[i].health = snap.health;
+          this.enemies[i].alive = snap.alive;
+        }
+      }
+    }
+
     if (!result.fired) return;
+
+    // Co-op: report hitscan to the server — server is authoritative for damage.
+    if (this.netConnected && this.netClient) {
+      const weaponSlot = WEAPON_ORDER.indexOf(result.weaponKind) + 1;
+      if (weaponSlot > 0) {
+        this.netClient.send({ type: 'shoot', x: this.player.x, y: this.player.y, yaw: this.player.angle, weapon: weaponSlot });
+      }
+    }
 
     notifyRaycastGunfire(this.enemies, this.player.x, this.player.y, this.time.now);
 
@@ -2123,11 +2340,18 @@ export class RaycastScene extends Phaser.Scene {
         const bossDamage = Math.max(1, Math.round(baseBossDamage * this.getPlayerDamageMultiplier()));
         this.runPelletsHitHostile += bossPellets;
         this.runBossPelletsHitHostile += bossPellets;
-        const killed = damageRaycastBoss(targetBoss, bossDamage, this.time.now, {
-          fromX: this.player.x,
-          fromY: this.player.y,
-          map: this.map
-        });
+        // In co-op the server is authoritative for boss HP/alive. The shoot
+        // message was already sent to the server above (sendShoot); the boss
+        // death will arrive via snap.level.bossAlive and be mirrored by
+        // syncLevelStateFromSnapshot. Skip the local mutation so the bar
+        // does not run ahead of the server's truth.
+        const killed = this.netConnected
+          ? false
+          : damageRaycastBoss(targetBoss, bossDamage, this.time.now, {
+              fromX: this.player.x,
+              fromY: this.player.y,
+              map: this.map
+            });
         const bossCrit = !killed && bossDamage >= Math.ceil(targetBoss.maxHealth * 0.14);
         if (killed) {
           this.runScore += this.applyEventScoreGain(addRaycastBossClearScore(0));
@@ -2970,16 +3194,14 @@ export class RaycastScene extends Phaser.Scene {
   private updateEnemies(delta: number): void {
     const liveBosses = this.getLiveBosses();
     this.trySpawnBossAdds(liveBosses);
-    const bossPlayerCtx = {
-      x: this.player.x,
-      y: this.player.y,
-      alive: this.playerAlive,
-      stationaryMs: this.playerStationaryMs,
-      vx: this.player.velocity.x,
-      vy: this.player.velocity.y
-    };
+    const bossPlayerCtx = this.buildBossPlayerCtx();
     for (const boss of liveBosses) {
-      tickRaycastBossMovement(boss, this.map, bossPlayerCtx, delta, this.time.now);
+      // In co-op the server drives boss movement and ships boss.x/y in the
+      // snapshot (syncLevelStateFromSnapshot mirrors it). Running movement
+      // locally would race the snapshot and cause jitter.
+      if (!this.netConnected) {
+        tickRaycastBossMovement(boss, this.map, bossPlayerCtx, delta, this.time.now);
+      }
       const bossHud = getRaycastBossHudLines(boss.displayName);
       if (isBossDesperation(boss) && !boss.desperationAnnounced) {
         boss.desperationAnnounced = true;
@@ -3267,6 +3489,11 @@ export class RaycastScene extends Phaser.Scene {
 
     this.currentLevel.exits.forEach((exit) => {
       if (this.levelComplete) return;
+      // In co-op, the server is authoritative for level transitions (Model B:
+      // any player reaching the exit advances everyone). Detecting the exit
+      // locally would set levelComplete = true, freeze the update loop, and
+      // stop sendInput — the server would never see the player at the exit.
+      if (this.netConnected) return;
       if (!isNearPoint(this.player.x, this.player.y, exit)) return;
       const exitAccess = getRaycastExitAccess(this.currentLevel, {
         collectedKeyIds: this.currentLevel.keys.filter((key) => this.keySystem.hasKey(key.id)).map((key) => key.id),
@@ -4671,5 +4898,149 @@ export class RaycastScene extends Phaser.Scene {
       .map((pickup) => Math.hypot(pickup.x - this.player.x, pickup.y - this.player.y));
 
     return distances.length > 0 ? Math.min(...distances) : null;
+  }
+
+  // ── Multiplayer helpers ─────────────────────────────────────────────────────
+
+  /**
+   * Replaces the local enemies array with authoritative data from the server
+   * snapshot. Existing entries are updated in-place to preserve client-side
+   * visual state (hit flash, death burst, stagger, etc.).
+   * New entries are created via createRaycastEnemy (which already initialises
+   * variant='BASE' and all optional fields to neutral values), then overridden
+   * with server-authoritative hp/position/state.
+   *
+   * The server is authoritative for hp, position, and FSM state.
+   * Variant/elite metadata stays BASE for server-spawned enemies — the protocol
+   * does not carry variant info yet.
+   * TODO: add variant field to EnemyState in shared/types.ts in a future phase.
+   */
+  /**
+   * Applies server-authoritative key and door state from the snapshot.
+   * Only called in co-op (netConnected); single-player uses local systems.
+   *
+   * Keys are synced first so that doorSystem.attemptOpen() can find them
+   * when we subsequently force-open doors the server has already opened.
+   * Opening a door via this path mutates this.map (same as tryOpenDoor)
+   * but skips audio/narration — that feedback can be added later.
+   */
+  /**
+   * Build the player context the local boss uses for volleys (and, in
+   * single-player, movement too). In co-op aims at the server-selected
+   * target so all clients converge on the same victim — visible rotation.
+   * Remote-player velocity/stationaryMs are not tracked client-side; we
+   * pass zeros (matches the server's movement choice and only degrades
+   * volley pattern selection slightly).
+   */
+  private buildBossPlayerCtx(): RaycastBossPlayerContext {
+    if (this.netConnected && this.netState && this.coopBossTargetId !== null) {
+      const targetId = this.coopBossTargetId;
+      if (targetId !== this.netState.localPlayerId) {
+        const remote = this.netState.getPlayerById(targetId);
+        if (remote) {
+          return { x: remote.x, y: remote.y, alive: remote.alive, vx: 0, vy: 0 };
+        }
+        // Target id known but player not in latest snapshot — fall through
+        // to local player as a safe default.
+      }
+    }
+    return {
+      x: this.player.x,
+      y: this.player.y,
+      alive: this.playerAlive,
+      stationaryMs: this.playerStationaryMs,
+      vx: this.player.velocity.x,
+      vy: this.player.velocity.y,
+    };
+  }
+
+  private syncLevelStateFromSnapshot(snap: SnapshotMessage): void {
+    // ── Keys ───────────────────────────────────────────────────────────────
+    for (const keyId of snap.level.keysCollected) {
+      if (this.keySystem.hasKey(keyId)) continue;
+      const key = this.currentLevel.keys.find((k) => k.id === keyId);
+      if (key) this.keySystem.collect(key);
+    }
+
+    // ── Doors ──────────────────────────────────────────────────────────────
+    // After key sync above, any key the server used to open a door is now in
+    // the local keySystem, so attemptOpen(door, 0) will succeed.
+    for (const doorState of snap.doors) {
+      if (!doorState.open || this.doorSystem.isOpen(doorState.id)) continue;
+      const door = this.currentLevel.doors.find((d) => d.id === doorState.id);
+      if (!door) continue;
+      const result = this.doorSystem.attemptOpen(door, 0);
+      if (!result.opened) continue;
+      openRaycastDoor(this.map, door);
+      // Invalidate minimap cache so the open door is reflected immediately.
+      this.mapLayoutRevision += 1;
+      this.minimapStaticCellsCacheKey = '';
+      this.minimapStaticCells = null;
+    }
+
+    // ── Boss ───────────────────────────────────────────────────────────────
+    // Server owns HP and alive on boss arenas; mirror them into the local
+    // boss state so every player sees the same bar and the boss dies for all
+    // at the same time. Movement/AI/volleys still run locally per client.
+    const localBoss = this.bossStates[0];
+    if (localBoss && snap.level.bossHp != null) {
+      localBoss.health = snap.level.bossHp;
+      if (snap.level.bossMaxHp != null) localBoss.maxHealth = snap.level.bossMaxHp;
+      localBoss.alive = snap.level.bossAlive ?? true;
+      if (snap.level.bossX != null) localBoss.x = snap.level.bossX;
+      if (snap.level.bossY != null) localBoss.y = snap.level.bossY;
+      syncRaycastBossPhase(localBoss);
+    }
+
+    // Track the server's chosen boss target so local volleys aim at the
+    // same player the server's movement is rotating to. Falls back to null
+    // outside boss arenas or when no target is selected yet.
+    this.coopBossTargetId = snap.level.bossTargetId ?? null;
+  }
+
+  private syncEnemiesFromSnapshot(enemyStates: EnemyState[]): void {
+    const existingById = new Map(this.enemies.map((e) => [e.id, e]));
+    this.enemies = enemyStates.map((es) => {
+      const existing = existingById.get(es.id);
+      const alive = es.state !== 'DEAD';
+      const now = this.time.now;
+
+      if (existing) {
+        // Update server-authoritative fields; preserve client visual state.
+        existing.x = es.x;
+        existing.y = es.y;
+        existing.health = es.hp;
+        existing.alive = alive;
+        existing.spawnTelegraphUntil = es.state === 'SPAWN' ? now + 9999 : 0;
+        existing.attackWindupUntil = es.state === 'ATTACK' ? now + 9999 : 0;
+        return existing;
+      }
+
+      // New enemy from server: createRaycastEnemy already sets variant='BASE'
+      // and all optional fields to safe neutral defaults.
+      const enemy = createRaycastEnemy({ id: es.id, kind: es.archetype as EnemyKind, x: es.x, y: es.y });
+      enemy.health = es.hp;
+      enemy.alive = alive;
+      if (es.state === 'SPAWN') enemy.spawnTelegraphUntil = now + 9999;
+      if (es.state === 'ATTACK') enemy.attackWindupUntil = now + 9999;
+      return enemy;
+    });
+  }
+
+  /**
+   * Converts remote PlayerState entries from the last server snapshot into
+   * RaycastBillboards so the renderer draws them as colored circles in 3D.
+   * Rendered as cyan circles (0x00d9ff) with the player name as label.
+   * No style glyph — plain circle, visually distinct from enemies and pickups.
+   */
+  private buildRemotePlayerBillboards(): RaycastBillboard[] {
+    if (!this.netState) return [];
+    return this.netState.getRemotePlayers().map((p) => ({
+      x: p.x,
+      y: p.y,
+      color: 0x00d9ff,
+      radius: 0.28,
+      label: p.name.slice(0, 8).toUpperCase()
+    }));
   }
 }
