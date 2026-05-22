@@ -5033,13 +5033,14 @@ export class RaycastScene extends Phaser.Scene {
    * Rendered as cyan circles (0x00d9ff) with the player name as label.
    * No style glyph — plain circle, visually distinct from enemies and pickups.
    */
-  private buildRemotePlayerBillboards(): RaycastBillboard[] {
+    private buildRemotePlayerBillboards(): RaycastBillboard[] {
     if (!this.netState) return [];
     return this.netState.getRemotePlayers().map((p) => ({
       x: p.x,
       y: p.y,
       color: 0x00d9ff,
-      radius: 0.28,
+      radius: 0.30,
+      style: "player",
       label: p.name.slice(0, 8).toUpperCase()
     }));
   }
